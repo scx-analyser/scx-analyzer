@@ -76,10 +76,15 @@ def main():
     ms = {m["title"]: m["number"] for m in (gh.api("GET", "milestones?state=all&per_page=100", paginate=True, allow_fail=a.dry_run) or [])}
     ms_num = {}
     for m in plan["milestones"]:
+        due = {"due_on": f"{m['due_on']}T23:59:59Z"} if m.get("due_on") else {}
         if m["title"] not in ms:
-            ms[m["title"]] = gh.api("POST", "milestones", {"title": m["title"], "description": m["description"]})["number"]
+            ms[m["title"]] = gh.api("POST", "milestones", {"title": m["title"], "description": m["description"], **due})["number"]
+        else:
+            gh.api("PATCH", f"milestones/{ms[m['title']]}", {"description": m["description"], **due})
         ms_num[m["key"]] = ms[m["title"]]
     print(f"milestones: {len(ms_num)} ok")
+
+    due_txt = {m["key"]: f" (due {m['due_on']})" for m in plan["milestones"] if m.get("due_on")}
 
     # ---- existing issues by title
     issues = gh.api("GET", "issues?state=all&per_page=100", paginate=True, allow_fail=a.dry_run) or []
@@ -109,7 +114,7 @@ def main():
     created = {}
     for t in tasks:
         title = f"[{t['id']}] {t['title']}"
-        labels = [epic_label[t["epic"]], f"size:{t['size']}"] + t.get("labels", [])
+        labels = [epic_label[t["epic"]]] + t.get("labels", [])
         body = t["body"] + f"\n\n---\nEpic: #{epics[t['epic']]['number']} · Milestone: {t['milestone']}"
         created[t["id"]] = ensure_issue(title, body, labels, ms_num[t["milestone"]], assignees.get(t["epic"]))
 
@@ -123,8 +128,12 @@ def main():
             dep_line = "Depends on: nothing - can start immediately."
             blocks = [x["id"] for x in tasks if t["id"] in x.get("depends_on", [])]
         block_line = ("Blocks: " + ", ".join(f"#{created[b]['number']} ({b})" for b in blocks)) if blocks else ""
-        body = (t["body"] + f"\n\n---\nEpic: #{epics[t['epic']]['number']} · Milestone: {t['milestone']} · Size: {t['size']}\n"
-                f"{dep_line}\n{block_line}").rstrip()
+        est_line = ""
+        if t.get("est_human") or t.get("est_agent"):
+            est_line = (f"Estimated time: human ~{t.get('est_human', '?')} · "
+                        f"AI agent ~{t.get('est_agent', '?')} (plus human review)\n")
+        body = (t["body"] + f"\n\n---\nEpic: #{epics[t['epic']]['number']} · Milestone: {t['milestone']}{due_txt.get(t['milestone'], '')}\n"
+                f"{est_line}{dep_line}\n{block_line}").rstrip()
         gh.api("PATCH", f"issues/{i['number']}", {"body": body})
         # native sub-issue link (REST); ignore "already a sub-issue" errors on re-runs
         gh.api("POST", f"issues/{epics[t['epic']]['number']}/sub_issues", {"sub_issue_id": i["id"]}, allow_fail=True)
@@ -136,8 +145,10 @@ def main():
         for mkey in [m["key"] for m in plan["milestones"]]:
             ts = [t for t in tasks if t["epic"] == e["key"] and t["milestone"] == mkey]
             if ts:
-                lines.append(f"**{mkey}**")
-                lines += [f"- [ ] #{created[t['id']]['number']}" for t in ts]
+                lines.append(f"**{mkey}**{due_txt.get(mkey, '')}")
+                lines += [f"- [ ] #{created[t['id']]['number']}"
+                          + (f" — human ~{t['est_human']} · AI agent ~{t['est_agent']}" if t.get("est_human") else "")
+                          for t in ts]
         gh.api("PATCH", f"issues/{epics[e['key']]['number']}", {"body": "\n".join(lines)})
     print("done")
 

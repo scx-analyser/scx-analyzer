@@ -11,16 +11,20 @@
 milestones:
   - key: M0
     title: "Milestone 0"
-    description: "Week 1. Each epic publishes its contract (schema, fixture or environment). Unblocks everyone."
+    due_on: "2026-11-10"
+    description: "Due Tue Nov 10. Each epic publishes its contract (schema, fixture or environment). Unblocks everyone."
   - key: M1
     title: "Milestone 1"
-    description: "Weeks 2-4. 3 invariants written up; tool runs end-to-end on 3-5 kfuncs; first passing/failing test pairs."
+    due_on: "2026-11-25"
+    description: "Due Wed Nov 25. 3 invariants written up; tool runs end-to-end on 3-5 kfuncs; first passing/failing test pairs. Show progress at the course project sync on Wed Nov 18."
   - key: M2
     title: "Milestone 2"
-    description: "Weeks 5-8. All sched_ext kfuncs analysed recursively; all invariants checked; tests for every invariant."
+    due_on: "2026-12-04"
+    description: "Due Fri Dec 4. All sched_ext kfuncs analysed recursively; all invariants checked; tests for every invariant."
   - key: M3
     title: "Milestone 3"
-    description: "Weeks 9-10. Results table across all kfuncs, precision analysis, final report."
+    due_on: "2026-12-18"
+    description: "Due Fri Dec 18. Results table + scoring by Thu Dec 10; slides submitted Mon Dec 14; presentations Dec 15-16; final report (6-8 pages), code and deliverables submitted Fri Dec 18."
 
 labels:
   - {name: "epic", color: "5319e7", description: "Top-level epic"}
@@ -30,9 +34,6 @@ labels:
   - {name: "epic:D-validation", color: "d93f0b", description: "Epic D - validation, tests & report (20%)"}
   - {name: "contract", color: "b60205", description: "Shared interface - unblocks other epics, review by all"}
   - {name: "stretch", color: "c5def5", description: "Only if time permits"}
-  - {name: "size:S", color: "ededed", description: "<= 1 day"}
-  - {name: "size:M", color: "ededed", description: "2-3 days"}
-  - {name: "size:L", color: "ededed", description: "~1 week"}
 
 epics:
   - key: A
@@ -113,7 +114,8 @@ tasks:
   - id: A1
     epic: A
     milestone: M0
-    size: S
+    est_human: "1 day"
+    est_agent: "1-2 h"
     labels: [contract]
     title: "Pin kernel version and generate kfunc inventory"
     body: |
@@ -126,7 +128,8 @@ tasks:
   - id: A2
     epic: A
     milestone: M0
-    size: S
+    est_human: "1 day"
+    est_agent: "1 h"
     labels: [contract]
     title: "Define invariant catalog schema (contract)"
     body: |
@@ -137,7 +140,8 @@ tasks:
   - id: A3
     epic: A
     milestone: M1
-    size: L
+    est_human: "5 days"
+    est_agent: "1 day"
     title: "Invariant I1: calling context & locking requirements"
     depends_on: [A2]
     body: |
@@ -150,7 +154,8 @@ tasks:
   - id: A4
     epic: A
     milestone: M1
-    size: L
+    est_human: "5 days"
+    est_agent: "1 day"
     title: "Invariant I2: task ownership, DSQ membership & ops_state transitions"
     depends_on: [A2]
     body: |
@@ -162,7 +167,8 @@ tasks:
   - id: A5
     epic: A
     milestone: M1
-    size: L
+    est_human: "4 days"
+    est_agent: "6-8 h"
     title: "Invariant I3: CPU, affinity & argument validity"
     depends_on: [A2]
     body: |
@@ -173,7 +179,8 @@ tasks:
   - id: A6
     epic: A
     milestone: M2
-    size: M
+    est_human: "3 days"
+    est_agent: "4-6 h"
     labels: [stretch]
     title: "Invariant I4 (stretch): value ranges & flag combinations"
     depends_on: [A2]
@@ -182,7 +189,8 @@ tasks:
   - id: A7
     epic: A
     milestone: M2
-    size: L
+    est_human: "5 days"
+    est_agent: "1-1.5 days"
     title: "Manual ground-truth table: kfunc x invariant -> enforced how?"
     depends_on: [A3, A4, A5]
     body: |
@@ -193,7 +201,8 @@ tasks:
   - id: A8
     epic: A
     milestone: M3
-    size: M
+    est_human: "3 days"
+    est_agent: "3-4 h"
     title: "Report chapter: invariants & how the kernel enforces them"
     depends_on: [A7]
     body: |
@@ -203,7 +212,8 @@ tasks:
   - id: B1
     epic: B
     milestone: M0
-    size: S
+    est_human: "1 day"
+    est_agent: "1-2 h"
     labels: [contract]
     title: "Define call-graph schema + hand-written fixture (contract)"
     body: |
@@ -215,7 +225,8 @@ tasks:
   - id: B2
     epic: B
     milestone: M0
-    size: M
+    est_human: "2-3 days"
+    est_agent: "3-5 h"
     title: "Reproducible clang kernel build producing LLVM IR for kernel/sched"
     body: |
       - Pinned kernel (A1), config with `CONFIG_SCHED_CLASS_EXT=y`, `CONFIG_DEBUG_INFO_BTF=y`, lockdep.
@@ -227,7 +238,8 @@ tasks:
   - id: B3
     epic: B
     milestone: M1
-    size: L
+    est_human: "5 days"
+    est_agent: "6-8 h"
     title: "Direct call graph from kfunc roots"
     depends_on: [B2]
     body: |
@@ -238,7 +250,8 @@ tasks:
   - id: B4
     epic: B
     milestone: M1
-    size: M
+    est_human: "2-3 days"
+    est_agent: "3-4 h"
     title: "Recursive expansion with depth limit and subsystem boundary"
     depends_on: [B3]
     body: |
@@ -246,7 +259,8 @@ tasks:
   - id: B5
     epic: B
     milestone: M1
-    size: L
+    est_human: "5 days"
+    est_agent: "1 day"
     title: "Field read/write sets for task_struct, rq, scx_dispatch_q"
     depends_on: [B3]
     body: |
@@ -257,7 +271,8 @@ tasks:
   - id: B6
     epic: B
     milestone: M2
-    size: L
+    est_human: "5 days"
+    est_agent: "1 day"
     title: "Ordered event extraction: locks, lockdep asserts, atomics, errors, guards"
     depends_on: [B3]
     body: |
@@ -267,7 +282,8 @@ tasks:
   - id: B7
     epic: B
     milestone: M2
-    size: M
+    est_human: "3 days"
+    est_agent: "4-6 h"
     title: "Indirect calls: SCX_CALL_OP / sched_class hooks"
     depends_on: [B3]
     body: |
@@ -276,7 +292,8 @@ tasks:
   - id: B8
     epic: B
     milestone: M2
-    size: S
+    est_human: "1 day"
+    est_agent: "1-2 h"
     title: "CLI + DOT/graphviz visualization"
     depends_on: [B4]
     body: |
@@ -285,7 +302,8 @@ tasks:
   - id: B9
     epic: B
     milestone: M3
-    size: M
+    est_human: "2 days"
+    est_agent: "2-3 h"
     title: "Report chapter: call-graph extraction design & limitations"
     depends_on: [B6]
     body: |
@@ -295,7 +313,8 @@ tasks:
   - id: C1
     epic: C
     milestone: M0
-    size: S
+    est_human: "1 day"
+    est_agent: "1-2 h"
     labels: [contract]
     title: "Define findings schema + checker plugin interface (contract)"
     body: |
@@ -307,7 +326,8 @@ tasks:
   - id: C2
     epic: C
     milestone: M1
-    size: M
+    est_human: "3 days"
+    est_agent: "4-6 h"
     title: "Execution-context model: ops callbacks -> entry locks & allowed kfunc sets"
     depends_on: [C1]
     body: |
@@ -316,7 +336,8 @@ tasks:
   - id: C3
     epic: C
     milestone: M1
-    size: L
+    est_human: "5 days"
+    est_agent: "1 day"
     title: "Lockset analysis -> checker for I1 and protected-field writes"
     depends_on: [C1]
     body: |
@@ -325,7 +346,8 @@ tasks:
   - id: C4
     epic: C
     milestone: M1
-    size: L
+    est_human: "5 days"
+    est_agent: "1 day"
     title: "Guard extraction -> checker for I3 (argument/CPU/DSQ validity)"
     depends_on: [C1]
     body: |
@@ -334,7 +356,8 @@ tasks:
   - id: C5
     epic: C
     milestone: M2
-    size: L
+    est_human: "5 days"
+    est_agent: "1 day"
     title: "State-transition checker for I2 (ops_state, DSQ membership)"
     depends_on: [C3]
     body: |
@@ -343,7 +366,8 @@ tasks:
   - id: C6
     epic: C
     milestone: M2
-    size: L
+    est_human: "4 days"
+    est_agent: "6-8 h"
     title: "Classifier: static vs runtime vs unenforced"
     depends_on: [C3, C4]
     body: |
@@ -351,7 +375,8 @@ tasks:
   - id: C7
     epic: C
     milestone: M3
-    size: M
+    est_human: "3 days"
+    est_agent: "4-6 h"
     title: "Precision pass: fix false positives/negatives reported by Epic D"
     depends_on: [C6]
     body: |
@@ -361,7 +386,8 @@ tasks:
   - id: D1
     epic: D
     milestone: M0
-    size: M
+    est_human: "2-3 days"
+    est_agent: "3-5 h"
     labels: [contract]
     title: "Test VM: pinned kernel in virtme-ng + baseline sched_ext selftests"
     body: |
@@ -372,7 +398,8 @@ tasks:
   - id: D2
     epic: D
     milestone: M1
-    size: M
+    est_human: "2-3 days"
+    est_agent: "3-4 h"
     title: "Test harness: load scheduler, capture outcome"
     depends_on: [D1]
     body: |
@@ -382,7 +409,8 @@ tasks:
   - id: D3
     epic: D
     milestone: M1
-    size: L
+    est_human: "4 days"
+    est_agent: "6-8 h"
     title: "Test pairs for I1 (context & locking)"
     depends_on: [D2]
     body: |
@@ -391,7 +419,8 @@ tasks:
   - id: D4
     epic: D
     milestone: M1
-    size: L
+    est_human: "4 days"
+    est_agent: "6-8 h"
     title: "Test pairs for I3 (CPU / affinity / argument validity)"
     depends_on: [D2]
     body: |
@@ -399,7 +428,8 @@ tasks:
   - id: D5
     epic: D
     milestone: M2
-    size: L
+    est_human: "4 days"
+    est_agent: "6-8 h"
     title: "Test pairs for I2 (ownership & DSQ membership)"
     depends_on: [D2]
     body: |
@@ -407,7 +437,8 @@ tasks:
   - id: D6
     epic: D
     milestone: M3
-    size: M
+    est_human: "3 days"
+    est_agent: "4-6 h"
     title: "Run tool on all kfuncs; results table with explanations"
     depends_on: [D2]
     body: |
@@ -416,7 +447,8 @@ tasks:
   - id: D7
     epic: D
     milestone: M3
-    size: M
+    est_human: "2-3 days"
+    est_agent: "3-4 h"
     title: "Score tool vs tests vs manual ground truth"
     depends_on: [D6]
     body: |
@@ -424,7 +456,8 @@ tasks:
   - id: D8
     epic: D
     milestone: M3
-    size: L
+    est_human: "5 days"
+    est_agent: "1-1.5 days"
     labels: [stretch]
     title: "Stretch: expose one static constraint to the BPF verifier"
     body: |
@@ -432,8 +465,14 @@ tasks:
   - id: D9
     epic: D
     milestone: M3
-    size: M
+    est_human: "3 days"
+    est_agent: "3-4 h"
     title: "Final report integration"
     depends_on: [D6]
     body: |
       Assemble `docs/report/` (chapters from A, B, C, D), slides, reproducibility instructions.
+      Course deadlines: **slides due Mon Dec 14** (10 min talk + 5 min Q&A, Dec 15-16), **report + code due Fri Dec 18**.
+      Report: 6-8 pages - problem, motivation, background & related work; methodology, design & implementation status;
+      evaluation setup, baselines, workloads, metrics, results & reproducibility; correctness arguments & assumptions;
+      limitations, conclusions, team contributions, references.
+      Slides: problem, motivation & goals; key idea, approach & implementation; main results & evidence; limitations & takeaways.

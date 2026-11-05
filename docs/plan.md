@@ -1,16 +1,25 @@
 # Project plan
 
-Four epics, one per person, each with a week-1 **contract** that unblocks the others. After M0, hard
+Four epics, one per person, each with a first-milestone **contract** that unblocks the others. After M0, hard
 dependencies only exist *inside* an epic, except for the final scoring step (C7 ← D7, A7 → D7).
+
+## Course deadlines
+
+| Date | What |
+|---|---|
+| Wed 2026-11-18 | Project sync in the exercise session (not graded, attendance strongly encouraged) |
+| Mon 2026-12-14 | Submit presentation slides |
+| Tue-Wed 2026-12-15/16 | Presentations: 10 min + 5 min Q&A per team |
+| Fri 2026-12-18 | Submit final report (6-8 pages), codebase (GitHub link or ZIP) and project deliverables |
 
 ## Milestones
 
 | Milestone | When | Exit criteria |
 |---|---|---|
-| **Milestone 0** (M0, Contracts & setup) | week 1 | 3 schemas + fixtures merged, kernel pinned, IR builds, VM boots |
-| **Milestone 1** (M1, Prototype) | weeks 2-4 | I1-I3 written up; extractor + checkers run end-to-end on 3-5 kfuncs; first test pairs |
-| **Milestone 2** (M2, Full coverage) | weeks 5-8 | all kfuncs, recursive, all invariants checked, tests for every invariant |
-| **Milestone 3** (M3, Validation & report) | weeks 9-10 | results table for all kfuncs, precision/recall, report |
+| **Milestone 0** (M0, Contracts & setup) | Nov 5-10 — **due Tue 2026-11-10** | 3 schemas + fixtures merged, kernel pinned, IR builds, VM boots |
+| **Milestone 1** (M1, Prototype) | Nov 11-25 — **due Wed 2026-11-25** (course sync Wed Nov 18) | I1-I3 written up; extractor + checkers run end-to-end on 3-5 kfuncs; first test pairs |
+| **Milestone 2** (M2, Full coverage) | Nov 26-Dec 4 — **due Fri 2026-12-04** | all kfuncs, recursive, all invariants checked, tests for every invariant |
+| **Milestone 3** (M3, Validation & report) | Dec 7-18 — **due Fri 2026-12-18** (results by Dec 10, slides Dec 14, talks Dec 15-16) | results table for all kfuncs, precision/recall, report |
 
 ## Work per person per milestone
 

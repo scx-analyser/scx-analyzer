@@ -24,7 +24,7 @@ satisfy or deliberately violate each constraint.
 
 ## How we stay parallel
 
-1. **Contracts first (M0, week 1).** Each epic publishes one schema/fixture/environment in `contracts/`.
+1. **Contracts first (M0, due Tue Nov 10).** Each epic publishes one schema/fixture/environment in `contracts/`.
    Changing a contract needs approval from every consumer (see `.github/CODEOWNERS`).
 2. **Code against fixtures, not against each other.** C develops on
    `contracts/fixtures/callgraph.example.json` while B builds the real extractor; D builds the VM and tests
