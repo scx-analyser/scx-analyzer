@@ -1,0 +1,86 @@
+{
+  "kernel_version": "TBD (see KERNEL_VERSION)",
+  "generator": "hand-written",
+  "illustrative": true,
+  "roots": ["scx_bpf_dsq_insert", "scx_bpf_kick_cpu"],
+  "nodes": {
+    "scx_bpf_dsq_insert": {
+      "kind": "kfunc",
+      "file": "kernel/sched/ext.c",
+      "depth": 0,
+      "writes": ["task_struct.scx.slice"],
+      "events": [
+        {"kind": "call", "target": "scx_dsq_insert_preamble"},
+        {"kind": "guard", "cond": "!scx_dsq_insert_preamble(p, enq_flags)", "action": "return"},
+        {"kind": "write", "field": "task_struct.scx.slice", "op": "set"},
+        {"kind": "call", "target": "scx_dsq_insert_commit"}
+      ],
+      "callees": [
+        {"target": "scx_dsq_insert_preamble", "kind": "direct"},
+        {"target": "scx_dsq_insert_commit", "kind": "direct"}
+      ]
+    },
+    "scx_dsq_insert_preamble": {
+      "kind": "internal",
+      "file": "kernel/sched/ext.c",
+      "depth": 1,
+      "reads": ["task_struct.scx.kf_mask"],
+      "events": [
+        {"kind": "guard", "cond": "!scx_kf_allowed(SCX_KF_ENQUEUE | SCX_KF_DISPATCH)", "action": "error"},
+        {"kind": "guard", "cond": "!p", "action": "error", "msg": "called with NULL task"},
+        {"kind": "guard", "cond": "enq_flags & INTERNAL_FLAGS", "action": "error", "msg": "invalid enq_flags"}
+      ],
+      "callees": [{"target": "scx_kf_allowed", "kind": "direct"}]
+    },
+    "scx_kf_allowed": {
+      "kind": "internal",
+      "file": "kernel/sched/ext.c",
+      "depth": 2,
+      "reads": ["task_struct.scx.kf_mask"],
+      "events": [{"kind": "error", "msg": "kfunc called from disallowed context"}],
+      "callees": []
+    },
+    "scx_dsq_insert_commit": {
+      "kind": "internal",
+      "file": "kernel/sched/ext.c",
+      "depth": 1,
+      "reads": ["task_struct.scx.ops_state"],
+      "events": [
+        {"kind": "guard", "cond": "direct_dispatch_task == p", "action": "continue"},
+        {"kind": "call", "target": "mark_direct_dispatch"},
+        {"kind": "guard", "cond": "dspc->cursor >= dispatch_max_batch", "action": "error", "msg": "dispatch buffer overflow"}
+      ],
+      "callees": [{"target": "mark_direct_dispatch", "kind": "direct"}]
+    },
+    "mark_direct_dispatch": {
+      "kind": "internal",
+      "file": "kernel/sched/ext.c",
+      "depth": 2,
+      "writes": ["task_struct.scx.ddsp_dsq_id", "task_struct.scx.ddsp_enq_flags"],
+      "events": [
+        {"kind": "assert_held", "lock": "rq"},
+        {"kind": "write", "field": "task_struct.scx.ddsp_dsq_id", "op": "set"}
+      ],
+      "callees": []
+    },
+    "scx_bpf_kick_cpu": {
+      "kind": "kfunc",
+      "file": "kernel/sched/ext.c",
+      "depth": 0,
+      "events": [
+        {"kind": "guard", "cond": "!ops_cpu_valid(cpu, NULL)", "action": "return"},
+        {"kind": "lock", "lock": "rq"},
+        {"kind": "write", "field": "rq.scx.flags", "op": "set"},
+        {"kind": "unlock", "lock": "rq"},
+        {"kind": "call", "target": "irq_work_queue"}
+      ],
+      "writes": ["rq.scx.flags"],
+      "callees": [
+        {"target": "ops_cpu_valid", "kind": "direct"},
+        {"target": "irq_work_queue", "kind": "direct"}
+      ]
+    },
+    "ops_cpu_valid": {"kind": "internal", "file": "kernel/sched/ext.c", "depth": 1, "events": [{"kind": "error", "msg": "invalid CPU"}], "callees": []},
+    "irq_work_queue": {"kind": "boundary", "file": "kernel/irq_work.c", "depth": 1, "callees": []}
+  }
+}

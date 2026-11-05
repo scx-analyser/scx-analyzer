@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scx-analyzer/findings.schema.json",
+  "title": "Checker findings (owned by Epic C, consumed by Epic D)",
+  "type": "object",
+  "required": ["kernel_version", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "kernel_version": {"type": "string"},
+    "callgraph": {"type": "string", "description": "Path/hash of the call graph analysed"},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kfunc", "invariant", "verdict", "enforcement"],
+        "additionalProperties": false,
+        "properties": {
+          "kfunc": {"type": "string"},
+          "invariant": {"type": "string"},
+          "verdict": {"enum": ["holds", "violated", "unknown", "not_applicable"]},
+          "enforcement": {
+            "type": "array",
+            "items": {"enum": ["kfunc_set", "verifier", "kf_mask", "lock", "lockdep", "scx_error", "warn", "guard", "atomic", "none", "unknown"]},
+            "description": "Mechanisms that enforce the invariant on this path"
+          },
+          "static_or_runtime": {"enum": ["static", "runtime", "static+runtime", "none", "unknown"]},
+          "explanation": {"type": "string"},
+          "path": {"type": "array", "items": {"type": "string"}, "description": "Call path from kfunc to the relevant site"},
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["function", "detail"],
+              "properties": {
+                "function": {"type": "string"},
+                "file": {"type": "string"},
+                "line": {"type": "integer"},
+                "detail": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

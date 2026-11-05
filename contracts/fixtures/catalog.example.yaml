@@ -1,0 +1,50 @@
+# Example catalog entries - DRAFT, to be replaced by Epic A (tasks A3-A5).
+# Field names and enforcement points must be verified against the pinned kernel.
+kernel_version: "TBD (see KERNEL_VERSION)"
+invariants:
+  - id: I1
+    title: "kfuncs are only callable from the ops callbacks/contexts their kfunc set allows"
+    category: context_locking
+    objects:
+      - {struct: task_struct, fields: [scx.kf_mask]}
+    access: read
+    requires:
+      contexts: ["ops.dispatch (SCX_KF_DISPATCH)"]
+      locks: [rq]
+    applies_to: [scx_bpf_dsq_move_to_local, scx_bpf_dispatch_nr_slots, scx_bpf_dispatch_cancel]
+    enforcement_expected: static+runtime
+    references:
+      - {file: kernel/sched/ext.c, note: "kfunc set registration + scx_kf_allowed()"}
+
+  - id: I2
+    title: "A task's DSQ membership and ops_state change only under the owning lock / via atomics"
+    category: ownership_state
+    objects:
+      - {struct: task_struct, fields: [scx.dsq, scx.dsq_list, scx.ops_state]}
+      - {struct: scx_dispatch_q, fields: [list, nr]}
+    access: write
+    requires:
+      locks: [dsq]
+      transitions:
+        - [SCX_OPSS_NONE, SCX_OPSS_QUEUEING]
+        - [SCX_OPSS_QUEUEING, SCX_OPSS_QUEUED]
+        - [SCX_OPSS_QUEUED, SCX_OPSS_DISPATCHING]
+        - [SCX_OPSS_DISPATCHING, SCX_OPSS_NONE]
+    applies_to: ["*"]
+    enforcement_expected: runtime
+    references:
+      - {file: kernel/sched/ext.c, note: "dispatch_enqueue(), finish_dispatch()"}
+
+  - id: I3
+    title: "Local-DSQ dispatch targets a valid CPU the task is allowed to run on"
+    category: argument_validity
+    objects:
+      - {struct: task_struct, fields: [cpus_ptr]}
+      - {struct: rq, fields: [scx.local_dsq]}
+    access: write
+    requires:
+      predicates: ["ops_cpu_valid(cpu)", "cpumask_test_cpu(cpu, p->cpus_ptr)"]
+    applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert_vtime, scx_bpf_dsq_move]
+    enforcement_expected: runtime
+    references:
+      - {file: kernel/sched/ext.c, note: "SCX_DSQ_LOCAL_ON handling, task_can_run_on_remote_rq()"}

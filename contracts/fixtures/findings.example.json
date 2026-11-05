@@ -1,0 +1,26 @@
+{
+  "kernel_version": "TBD (see KERNEL_VERSION)",
+  "callgraph": "contracts/fixtures/callgraph.example.json",
+  "findings": [
+    {
+      "kfunc": "scx_bpf_dsq_insert",
+      "invariant": "I1",
+      "verdict": "holds",
+      "enforcement": ["kfunc_set", "kf_mask"],
+      "static_or_runtime": "static+runtime",
+      "explanation": "Registered in the enqueue/dispatch kfunc set; scx_kf_allowed() rejects other contexts at runtime.",
+      "path": ["scx_bpf_dsq_insert", "scx_dsq_insert_preamble", "scx_kf_allowed"],
+      "evidence": [{"function": "scx_dsq_insert_preamble", "file": "kernel/sched/ext.c", "detail": "guard !scx_kf_allowed(...) -> error"}]
+    },
+    {
+      "kfunc": "scx_bpf_kick_cpu",
+      "invariant": "I3",
+      "verdict": "holds",
+      "enforcement": ["guard", "scx_error"],
+      "static_or_runtime": "runtime",
+      "explanation": "ops_cpu_valid() checked before rq state is touched.",
+      "path": ["scx_bpf_kick_cpu", "ops_cpu_valid"],
+      "evidence": [{"function": "scx_bpf_kick_cpu", "detail": "guard !ops_cpu_valid(cpu) precedes write rq.scx.flags"}]
+    }
+  ]
+}

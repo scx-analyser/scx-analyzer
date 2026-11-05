@@ -1,0 +1,11 @@
+# Contracts need review from every consumer.
+/contracts/catalog.schema.json      @Adessrrrr @housss77 @othmanehousni
+/contracts/callgraph.schema.json    @kaspro-coder @housss77
+/contracts/findings.schema.json     @housss77 @othmanehousni
+/contracts/fixtures/                @Adessrrrr @kaspro-coder @housss77 @othmanehousni
+
+/catalog/      @Adessrrrr
+/extractor/    @kaspro-coder
+/checker/      @housss77
+/validation/   @othmanehousni
+/docs/report/  @othmanehousni

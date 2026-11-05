@@ -1,0 +1,439 @@
+# Source of truth for the project backlog.
+# `python3 planning/create_issues.py --repo scx-analyser/scx-analyzer` turns this
+# file into GitHub labels, milestones, 4 epic issues and their task sub-issues.
+#
+# Parallelization rules baked into this plan:
+#   * Every epic owns ONE contract (schema/fixture/env) due in M0. After M0 nobody
+#     waits on another person's implementation: they code against the fixture.
+#   * `depends_on` lists only HARD dependencies. Everything else runs in parallel.
+#   * Each epic has work in every milestone, so all 4 people are busy all the time.
+
+milestones:
+  - key: M0
+    title: "Milestone 0"
+    description: "Week 1. Each epic publishes its contract (schema, fixture or environment). Unblocks everyone."
+  - key: M1
+    title: "Milestone 1"
+    description: "Weeks 2-4. 3 invariants written up; tool runs end-to-end on 3-5 kfuncs; first passing/failing test pairs."
+  - key: M2
+    title: "Milestone 2"
+    description: "Weeks 5-8. All sched_ext kfuncs analysed recursively; all invariants checked; tests for every invariant."
+  - key: M3
+    title: "Milestone 3"
+    description: "Weeks 9-10. Results table across all kfuncs, precision analysis, final report."
+
+labels:
+  - {name: "epic", color: "5319e7", description: "Top-level epic"}
+  - {name: "epic:A-catalog", color: "1d76db", description: "Epic A - kfunc inventory & invariant catalog (50%)"}
+  - {name: "epic:B-extractor", color: "0e8a16", description: "Epic B - call-graph extraction (30%)"}
+  - {name: "epic:C-checker", color: "fbca04", description: "Epic C - invariant checkers (30%)"}
+  - {name: "epic:D-validation", color: "d93f0b", description: "Epic D - validation, tests & report (20%)"}
+  - {name: "contract", color: "b60205", description: "Shared interface - unblocks other epics, review by all"}
+  - {name: "stretch", color: "c5def5", description: "Only if time permits"}
+  - {name: "size:S", color: "ededed", description: "<= 1 day"}
+  - {name: "size:M", color: "ededed", description: "2-3 days"}
+  - {name: "size:L", color: "ededed", description: "~1 week"}
+
+epics:
+  - key: A
+    label: "epic:A-catalog"
+    title: "[Epic A] Kfunc inventory & invariant catalog"
+    owner_hint: "Person A"
+    body: |
+      **Grading weight:** 50% (identify >= 3 invariants on scheduler state modified via sched_ext kfuncs).
+
+      **Goal:** a complete inventory of sched_ext kfuncs and a machine-readable catalog of invariants
+      (shared state touched, locks / execution context, read vs write, value ranges, flag combinations,
+      CPU / NUMA / rq restrictions, task state) that the tool (Epics B + C) checks and the tests (Epic D) exercise.
+
+      **Owns contract:** `contracts/catalog.schema.json` + `contracts/fixtures/catalog.example.yaml`.
+
+      **Core invariants:**
+      - **I1 - Calling context & locking:** which ops callback / lock state each kfunc may be called from
+        (kfunc sets, `scx_kf_allowed()`, `lockdep_assert_*`).
+      - **I2 - Task ownership & DSQ membership:** a task is on at most one DSQ; `p->scx.dsq` and DSQ lists
+        change only under `dsq->lock`; `p->scx.ops_state` transitions are atomic and follow NONE -> QUEUEING -> QUEUED -> DISPATCHING.
+      - **I3 - CPU / affinity / argument validity:** valid CPU, `p->cpus_ptr` respected for local dispatch,
+        valid `dsq_id`, no FIFO/vtime mixing, no vtime on built-in DSQs.
+      - *(stretch)* **I4 - Value ranges & flag combinations** (slice, vtime, `enq_flags`, `SCX_KICK_*`).
+
+      **Done when:** the catalog validates against the schema, covers all kfuncs x I1-I3, and the report chapter is written.
+
+  - key: B
+    label: "epic:B-extractor"
+    title: "[Epic B] Call-graph extraction from sched_ext kfuncs"
+    owner_hint: "Person B"
+    body: |
+      **Grading weight:** 30% (with Epic C) - the tool front end.
+
+      **Goal:** starting from every sched_ext kfunc, recursively expand the kernel call graph and annotate each
+      function with (a) struct-field reads/writes on `task_struct`, `sched_ext_entity`, `rq`, `scx_rq`,
+      `scx_dispatch_q`, and (b) an ordered list of "events" (lock/unlock, lockdep asserts, atomics, `scx_error`/`WARN`, early returns).
+
+      **Owns contract:** `contracts/callgraph.schema.json` + `contracts/fixtures/callgraph.example.json`.
+
+      **Done when:** `extractor` emits schema-valid JSON for all kfuncs on the pinned kernel, with configurable depth/boundary.
+
+  - key: C
+    label: "epic:C-checker"
+    title: "[Epic C] Invariant checkers & constraint classification"
+    owner_hint: "Person C"
+    body: |
+      **Grading weight:** 30% (with Epic B) - the verification mechanism.
+
+      **Goal:** consume the call graph (Epic B) + catalog (Epic A) and decide, per kfunc x invariant,
+      **holds / violated / unknown**, with evidence (file:line, lock, guard). Classify each constraint as
+      enforced **statically** (verifier / kfunc sets), at **runtime** (`scx_error`, `WARN`, lockdep), or **not enforced**.
+
+      **Owns contract:** `contracts/findings.schema.json` + `contracts/fixtures/findings.example.json`.
+
+      **Works in parallel with B** by developing against `contracts/fixtures/callgraph.example.json` until real output lands.
+
+      **Done when:** checkers for I1-I3 run on the full call graph and emit schema-valid findings.
+
+  - key: D
+    label: "epic:D-validation"
+    title: "[Epic D] Validation: sched_ext test programs, results & report"
+    owner_hint: "Person D"
+    body: |
+      **Grading weight:** 20% (apply tool to all kfuncs and explain results) + validation deliverable.
+
+      **Goal:** for every invariant, BPF schedulers that **satisfy** and that **deliberately violate** it; record what
+      the kernel does (verifier rejection, `scx_error` ejection, lockdep splat, nothing). Run the tool on all
+      kfuncs, compare with test outcomes, and explain for each kfunc *how* an invariant is enforced or *why* it does not hold.
+
+      **Owns contract:** the test VM / kernel image + `validation/harness` outcome format.
+
+      **Works in parallel from day 1:** the test environment and harness need only the pinned kernel, not the tool.
+
+      **Done when:** results table across all kfuncs + test suite + report are in `docs/`.
+
+tasks:
+  # ------------------------------------------------------------------ Epic A
+  - id: A1
+    epic: A
+    milestone: M0
+    size: S
+    labels: [contract]
+    title: "Pin kernel version and generate kfunc inventory"
+    body: |
+      - Agree on ONE kernel tag for the whole project (suggestion: the latest LTS with sched_ext). Record it in `KERNEL_VERSION`.
+      - Note naming drift: `scx_bpf_dispatch*` became `scx_bpf_dsq_insert*` / `scx_bpf_dsq_move*` in 6.13.
+      - Script (`catalog/scripts/inventory.*`) that extracts every kfunc from the `BTF_KFUNCS_START/BTF_ID_FLAGS` sets in
+        `kernel/sched/ext.c` and `kernel/sched/ext_idle.c` -> `catalog/kfuncs.csv` with columns: name, kfunc set, flags (KF_RCU, KF_RET_NULL, ...), file:line.
+
+      **Acceptance:** `catalog/kfuncs.csv` committed; B uses it as the list of roots.
+  - id: A2
+    epic: A
+    milestone: M0
+    size: S
+    labels: [contract]
+    title: "Define invariant catalog schema (contract)"
+    body: |
+      Finalize `contracts/catalog.schema.json` (draft provided) and the example entry.
+      Each invariant needs: id, description, objects/fields, required lock or context, read/write, predicate, static-vs-runtime expectation, kernel references.
+
+      **Acceptance:** reviewed by B, C, D (PR approval from each); CI schema check green.
+  - id: A3
+    epic: A
+    milestone: M1
+    size: L
+    title: "Invariant I1: calling context & locking requirements"
+    depends_on: [A2]
+    body: |
+      Manual analysis + docs (Documentation/scheduler/sched-ext.rst, ext.c comments):
+      - map each kfunc set (select_cpu, enqueue_dispatch, dispatch, cpu_release, unlocked, any) to allowed ops callbacks;
+      - which locks are held on entry to each callback (rq lock, none, ...);
+      - how it is enforced: kfunc-set registration (load time), `scx_kf_allowed()` / `current->scx.kf_mask` (runtime), `lockdep_assert_*`.
+
+      **Acceptance:** I1 entries in `catalog/invariants/I1.yaml` for all kfuncs + 1-2 page write-up.
+  - id: A4
+    epic: A
+    milestone: M1
+    size: L
+    title: "Invariant I2: task ownership, DSQ membership & ops_state transitions"
+    depends_on: [A2]
+    body: |
+      - Fields: `p->scx.dsq`, `p->scx.dsq_list`, `p->scx.ops_state`, `p->scx.holding_cpu`, `dsq->nr`, `rq->scx.*`.
+      - Which lock protects each (`dsq->lock`, rq lock, `task_rq_lock`), and the legal `ops_state` transitions (cmpxchg sites).
+      - Deferred writes: `scx_bpf_dsq_insert` from `ops.dispatch` only fills the per-CPU dispatch buffer; the real move happens in `finish_dispatch()`.
+
+      **Acceptance:** `catalog/invariants/I2.yaml` + write-up.
+  - id: A5
+    epic: A
+    milestone: M1
+    size: L
+    title: "Invariant I3: CPU, affinity & argument validity"
+    depends_on: [A2]
+    body: |
+      - CPU validity (`ops_cpu_valid`), `SCX_DSQ_LOCAL_ON | cpu`, `p->cpus_ptr` / migration-disabled checks on local dispatch and fallbacks to the global DSQ.
+      - `dsq_id` validity (built-in vs user, `SCX_DSQ_FLAG_BUILTIN`), FIFO vs vtime mixing, vtime on built-in DSQs, `enq_flags` validation.
+
+      **Acceptance:** `catalog/invariants/I3.yaml` + write-up.
+  - id: A6
+    epic: A
+    milestone: M2
+    size: M
+    labels: [stretch]
+    title: "Invariant I4 (stretch): value ranges & flag combinations"
+    depends_on: [A2]
+    body: |
+      Slice / vtime ranges, valid `enq_flags`, `SCX_KICK_*` combinations, `scx_bpf_create_dsq` node argument (NUMA), etc.
+  - id: A7
+    epic: A
+    milestone: M2
+    size: L
+    title: "Manual ground-truth table: kfunc x invariant -> enforced how?"
+    depends_on: [A3, A4, A5]
+    body: |
+      For every kfunc x invariant: holds? enforced statically / at runtime / not enforced? where (file:line)?
+      This is the oracle Epic D uses to score the tool (precision/recall).
+
+      **Acceptance:** `catalog/ground_truth.csv`.
+  - id: A8
+    epic: A
+    milestone: M3
+    size: M
+    title: "Report chapter: invariants & how the kernel enforces them"
+    depends_on: [A7]
+    body: |
+      Write `docs/report/01-invariants.md`: the invariants, the relationships between fields (task_struct <-> rq <-> DSQ), and which locks/contexts make them valid.
+
+  # ------------------------------------------------------------------ Epic B
+  - id: B1
+    epic: B
+    milestone: M0
+    size: S
+    labels: [contract]
+    title: "Define call-graph schema + hand-written fixture (contract)"
+    body: |
+      Finalize `contracts/callgraph.schema.json` (draft provided) and make `contracts/fixtures/callgraph.example.json`
+      a realistic hand-written graph for 2-3 kfuncs (e.g. `scx_bpf_dsq_insert`, `scx_bpf_dsq_move_to_local`, `scx_bpf_kick_cpu`).
+      **This fixture is what C develops against until B3-B7 land - make it representative.**
+
+      **Acceptance:** reviewed by C and D; CI schema check green.
+  - id: B2
+    epic: B
+    milestone: M0
+    size: M
+    title: "Reproducible clang kernel build producing LLVM IR for kernel/sched"
+    body: |
+      - Pinned kernel (A1), config with `CONFIG_SCHED_CLASS_EXT=y`, `CONFIG_DEBUG_INFO_BTF=y`, lockdep.
+      - Build with `LLVM=1` and emit bitcode/IR for `kernel/sched/build_policy.o` (ext.c is `#include`d there) and `kernel/sched/core.o`.
+      - Keep debug info so struct-field names can be recovered.
+      - Script it (`extractor/build_kernel_ir.sh`) - D reuses the same kernel for the VM.
+
+      **Acceptance:** one command produces the `.ll`/`.bc` files.
+  - id: B3
+    epic: B
+    milestone: M1
+    size: L
+    title: "Direct call graph from kfunc roots"
+    depends_on: [B2]
+    body: |
+      LLVM pass (C++) or IR parser that builds the direct call graph, rooted at every kfunc from `catalog/kfuncs.csv`
+      (until A1 lands, hard-code 3 roots). Inlined helpers must be handled (use debug-info inlined-at locations or build with `-fno-inline` for analysis).
+
+      **Acceptance:** schema-valid JSON for 3+ kfuncs.
+  - id: B4
+    epic: B
+    milestone: M1
+    size: M
+    title: "Recursive expansion with depth limit and subsystem boundary"
+    depends_on: [B3]
+    body: |
+      Configurable max depth, stop-list (printk, tracing, mm, ...), and "boundary" nodes (e.g. entering core.c) recorded but not expanded unless requested.
+  - id: B5
+    epic: B
+    milestone: M1
+    size: L
+    title: "Field read/write sets for task_struct, rq, scx_dispatch_q"
+    depends_on: [B3]
+    body: |
+      From `getelementptr` + load/store on `%struct.task_struct`, `%struct.sched_ext_entity`, `%struct.rq`, `%struct.scx_rq`, `%struct.scx_dispatch_q`
+      recover `struct.field` names via debug info, plus READ_ONCE/WRITE_ONCE and atomics.
+
+      **Acceptance:** `reads`/`writes` populated per node in the JSON.
+  - id: B6
+    epic: B
+    milestone: M2
+    size: L
+    title: "Ordered event extraction: locks, lockdep asserts, atomics, errors, guards"
+    depends_on: [B3]
+    body: |
+      Emit per-function, in program order: `lock`/`unlock` (raw_spin_rq_lock*, rq_lock*, task_rq_lock, raw_spin_lock(&dsq->lock), ...),
+      `assert_held`, `atomic_cmpxchg`/`atomic_set` (with target field), `scx_error`/`WARN`, and `guard` (condition + early return).
+      C consumes these for dataflow - agree on the exact encoding with C early.
+  - id: B7
+    epic: B
+    milestone: M2
+    size: M
+    title: "Indirect calls: SCX_CALL_OP / sched_class hooks"
+    depends_on: [B3]
+    body: |
+      Resolve or explicitly mark indirect calls (`SCX_CALL_OP*` into BPF ops, `sched_class` methods, `ext_sched_class`).
+      Unresolved targets must appear as `indirect` edges, never silently dropped.
+  - id: B8
+    epic: B
+    milestone: M2
+    size: S
+    title: "CLI + DOT/graphviz visualization"
+    depends_on: [B4]
+    body: |
+      `scxa extract --kernel <dir> --roots catalog/kfuncs.csv --depth N -o callgraph.json` and `scxa dot <kfunc>`.
+
+  - id: B9
+    epic: B
+    milestone: M3
+    size: M
+    title: "Report chapter: call-graph extraction design & limitations"
+    depends_on: [B6]
+    body: |
+      `docs/report/02-extractor.md`: approach, how inlining/indirect calls/macros are handled, depth/boundary choices, scalability numbers.
+
+  # ------------------------------------------------------------------ Epic C
+  - id: C1
+    epic: C
+    milestone: M0
+    size: S
+    labels: [contract]
+    title: "Define findings schema + checker plugin interface (contract)"
+    body: |
+      Finalize `contracts/findings.schema.json` (draft provided). Define the checker interface:
+      `check(callgraph, catalog) -> [Finding]`, one module per invariant under `checker/checkers/`.
+      Runner loads `contracts/fixtures/callgraph.example.json` so it works from day 1.
+
+      **Acceptance:** `scxa check --callgraph contracts/fixtures/callgraph.example.json` prints schema-valid (even if empty) findings.
+  - id: C2
+    epic: C
+    milestone: M1
+    size: M
+    title: "Execution-context model: ops callbacks -> entry locks & allowed kfunc sets"
+    depends_on: [C1]
+    body: |
+      Encode, per ops callback (select_cpu, enqueue, dispatch, cpu_release, init_task, ...), the locks held on entry and the
+      `SCX_KF_*` mask. This is the entry state for lockset analysis. Coordinate with A3 (same facts, A owns the doc, C owns the code).
+  - id: C3
+    epic: C
+    milestone: M1
+    size: L
+    title: "Lockset analysis -> checker for I1 and protected-field writes"
+    depends_on: [C1]
+    body: |
+      Interprocedural lockset over B's ordered events (function summaries: locks acquired/released, required-held).
+      Flag writes to protected fields (from the catalog) without the protecting lock. Start on the fixture.
+  - id: C4
+    epic: C
+    milestone: M1
+    size: L
+    title: "Guard extraction -> checker for I3 (argument/CPU/DSQ validity)"
+    depends_on: [C1]
+    body: |
+      Map `guard` / `scx_error` events to the catalog predicates (e.g. `ops_cpu_valid(cpu)`, dsq_id lookup, cpus_ptr test).
+      Report for each predicate whether it is checked before the corresponding state write on every path.
+  - id: C5
+    epic: C
+    milestone: M2
+    size: L
+    title: "State-transition checker for I2 (ops_state, DSQ membership)"
+    depends_on: [C3]
+    body: |
+      Check that `p->scx.ops_state` only changes via atomic ops to allowed values, and `p->scx.dsq` / list changes happen under `dsq->lock`.
+      Model deferred dispatch (dispatch buffer -> finish_dispatch).
+  - id: C6
+    epic: C
+    milestone: M2
+    size: L
+    title: "Classifier: static vs runtime vs unenforced"
+    depends_on: [C3, C4]
+    body: |
+      For each finding, decide where enforcement lives: kfunc-set registration / verifier (static), `scx_kf_allowed` / `scx_error` / lockdep (runtime), or nowhere.
+  - id: C7
+    epic: C
+    milestone: M3
+    size: M
+    title: "Precision pass: fix false positives/negatives reported by Epic D"
+    depends_on: [C6]
+    body: |
+      Iterate on D's comparison (D7). Document remaining imprecision in `docs/report/03-tool.md`.
+
+  # ------------------------------------------------------------------ Epic D
+  - id: D1
+    epic: D
+    milestone: M0
+    size: M
+    labels: [contract]
+    title: "Test VM: pinned kernel in virtme-ng + baseline sched_ext selftests"
+    body: |
+      Boot the pinned kernel (A1) with sched_ext, BTF and lockdep in virtme-ng (or QEMU). Build and run the upstream
+      `tools/testing/selftests/sched_ext` suite as a baseline. Document in `validation/README.md` so everyone can run it.
+
+      **Acceptance:** one command boots the VM and runs the selftests.
+  - id: D2
+    epic: D
+    milestone: M1
+    size: M
+    title: "Test harness: load scheduler, capture outcome"
+    depends_on: [D1]
+    body: |
+      `validation/harness`: build + load a BPF scheduler, then classify the outcome as
+      `verifier_reject` | `runtime_error` (scx_error / ejection, capture the exit reason & dump) | `lockdep` | `warn` | `ok`.
+      Each test declares its expected outcome and the catalog invariant id it targets.
+  - id: D3
+    epic: D
+    milestone: M1
+    size: L
+    title: "Test pairs for I1 (context & locking)"
+    depends_on: [D2]
+    body: |
+      e.g. calling a dispatch-only kfunc from `ops.enqueue`, calling `scx_bpf_dsq_move*` from a locked context, unlocked-only kfunc from `ops.dispatch`.
+      For each: one passing + one violating program.
+  - id: D4
+    epic: D
+    milestone: M1
+    size: L
+    title: "Test pairs for I3 (CPU / affinity / argument validity)"
+    depends_on: [D2]
+    body: |
+      Invalid CPU in `SCX_DSQ_LOCAL_ON`, dispatch to CPU outside `cpus_ptr`, non-existent `dsq_id`, mixing FIFO and vtime on one DSQ, vtime on a built-in DSQ, invalid `enq_flags`.
+  - id: D5
+    epic: D
+    milestone: M2
+    size: L
+    title: "Test pairs for I2 (ownership & DSQ membership)"
+    depends_on: [D2]
+    body: |
+      Double insert of the same task, inserting a task not owned in this context, dispatch buffer overflow, etc.
+  - id: D6
+    epic: D
+    milestone: M3
+    size: M
+    title: "Run tool on all kfuncs; results table with explanations"
+    depends_on: [D2]
+    body: |
+      Pipeline `extract -> check -> report` over all kfuncs. Produce `docs/report/04-results.md`: per kfunc x invariant,
+      **if it holds, how it is enforced** (lock + hand-written logic, kfunc set, ...), **if not, why**.
+  - id: D7
+    epic: D
+    milestone: M3
+    size: M
+    title: "Score tool vs tests vs manual ground truth"
+    depends_on: [D6]
+    body: |
+      Compare C's findings, test outcomes, and A7's ground truth. Report precision/recall and file issues for C7.
+  - id: D8
+    epic: D
+    milestone: M3
+    size: L
+    labels: [stretch]
+    title: "Stretch: expose one static constraint to the BPF verifier"
+    body: |
+      Prototype rejecting at load time one constraint that is today only checked at runtime (e.g. a stricter kfunc filter per ops callback).
+  - id: D9
+    epic: D
+    milestone: M3
+    size: M
+    title: "Final report integration"
+    depends_on: [D6]
+    body: |
+      Assemble `docs/report/` (chapters from A, B, C, D), slides, reproducibility instructions.

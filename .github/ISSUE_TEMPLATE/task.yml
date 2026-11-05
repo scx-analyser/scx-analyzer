@@ -1,0 +1,22 @@
+name: Task
+description: A unit of work inside one epic
+body:
+  - type: dropdown
+    id: epic
+    attributes:
+      label: Epic
+      options: ["A - Catalog", "B - Extractor", "C - Checker", "D - Validation"]
+    validations: {required: true}
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal & deliverable
+    validations: {required: true}
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+  - type: input
+    id: deps
+    attributes:
+      label: Depends on (issue numbers) - leave empty if it can start now

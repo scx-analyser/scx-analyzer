@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scx-analyzer/callgraph.schema.json",
+  "title": "Annotated call graph (owned by Epic B, consumed by Epic C)",
+  "type": "object",
+  "required": ["kernel_version", "generator", "roots", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "kernel_version": {"type": "string"},
+    "generator": {"type": "string", "description": "Tool + version, or 'hand-written' for fixtures"},
+    "illustrative": {"type": "boolean", "description": "true for hand-written fixtures not verified against kernel source"},
+    "roots": {"type": "array", "items": {"type": "string"}, "description": "kfunc names the traversal started from"},
+    "nodes": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/node"}
+    }
+  },
+  "$defs": {
+    "fieldref": {
+      "type": "string",
+      "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_\\[\\]]*)+$",
+      "description": "struct.field[.subfield], e.g. task_struct.scx.ops_state"
+    },
+    "node": {
+      "type": "object",
+      "required": ["kind", "callees"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["kfunc", "internal", "boundary", "external"], "description": "boundary = recorded but not expanded"},
+        "file": {"type": "string"},
+        "line": {"type": "integer"},
+        "depth": {"type": "integer", "minimum": 0},
+        "reads": {"type": "array", "items": {"$ref": "#/$defs/fieldref"}},
+        "writes": {"type": "array", "items": {"$ref": "#/$defs/fieldref"}},
+        "events": {"type": "array", "items": {"$ref": "#/$defs/event"}, "description": "In program order"},
+        "callees": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["target", "kind"],
+            "additionalProperties": false,
+            "properties": {
+              "target": {"type": "string", "description": "function name, or op name for unresolved indirect calls"},
+              "kind": {"enum": ["direct", "indirect"]},
+              "line": {"type": "integer"}
+            }
+          }
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["lock", "unlock", "assert_held", "assert_not_held", "atomic", "write", "error", "warn", "guard", "call"]},
+        "line": {"type": "integer"},
+        "lock": {"type": "string", "description": "Symbolic lock: rq, task_rq, dsq, pi_lock, ..."},
+        "field": {"$ref": "#/$defs/fieldref"},
+        "op": {"type": "string", "description": "e.g. cmpxchg, set, inc, read_once"},
+        "cond": {"type": "string", "description": "Source-level guard condition"},
+        "action": {"enum": ["return", "error", "fallback", "continue"], "description": "What happens when the guard fails"},
+        "target": {"type": "string", "description": "Callee for kind=call"},
+        "msg": {"type": "string"}
+      }
+    }
+  }
+}

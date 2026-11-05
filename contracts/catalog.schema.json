@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scx-analyzer/catalog.schema.json",
+  "title": "Invariant catalog (owned by Epic A)",
+  "type": "object",
+  "required": ["kernel_version", "invariants"],
+  "additionalProperties": false,
+  "properties": {
+    "kernel_version": {"type": "string"},
+    "invariants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "category", "objects", "access", "requires", "applies_to", "enforcement_expected"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^I[0-9]+(\\.[0-9]+)?$", "description": "e.g. I1, I2.3"},
+          "title": {"type": "string"},
+          "description": {"type": "string"},
+          "category": {"enum": ["context_locking", "ownership_state", "argument_validity", "value_range"]},
+          "objects": {
+            "type": "array",
+            "description": "Shared state involved, as struct + field paths (e.g. task_struct / scx.ops_state).",
+            "items": {
+              "type": "object",
+              "required": ["struct", "fields"],
+              "properties": {
+                "struct": {"type": "string"},
+                "fields": {"type": "array", "items": {"type": "string"}}
+              }
+            }
+          },
+          "access": {"enum": ["read", "write", "rw"]},
+          "requires": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "locks": {"type": "array", "items": {"type": "string"}, "description": "Symbolic lock names: rq, task_rq, dsq, pi_lock, none"},
+              "contexts": {"type": "array", "items": {"type": "string"}, "description": "ops callbacks or SCX_KF_* masks"},
+              "predicates": {"type": "array", "items": {"type": "string"}, "description": "Guard predicates that must hold before the write, e.g. ops_cpu_valid(cpu)"},
+              "transitions": {
+                "type": "array",
+                "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2},
+                "description": "Allowed [from, to] state transitions"
+              }
+            }
+          },
+          "applies_to": {"type": "array", "items": {"type": "string"}, "description": "kfunc names, or [\"*\"]"},
+          "enforcement_expected": {"enum": ["static", "runtime", "static+runtime", "none", "unknown"]},
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["file"],
+              "properties": {"file": {"type": "string"}, "line": {"type": "integer"}, "note": {"type": "string"}}
+            }
+          }
+        }
+      }
+    }
+  }
+}
