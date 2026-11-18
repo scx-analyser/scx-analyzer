@@ -84,10 +84,11 @@ def scan_file(path, rel):
         m = RE_ELSE.match(line)
         if m and cond_stack:
             prev = cond_stack.pop()
+            neg = prev[1:] if prev.startswith("!") and " " not in prev else f"!({prev})"
             if m.group(1) == "else":
-                cond_stack.append(f"!({prev})" if not prev.startswith("!") else prev[1:])
-            else:
-                cond_stack.append(m.group(2).split("/*")[0].strip())
+                cond_stack.append(neg)
+            else:  # #elif: previous branch false and the new condition true
+                cond_stack.append(f"{neg} && {m.group(2).split('/*')[0].strip()}")
             continue
         if RE_ENDIF.match(line):
             if cond_stack:
@@ -135,8 +136,10 @@ def main():
         sys.exit(f"error: {scan_root} not found; pass --kernel-src or set KERNEL_SRC")
 
     pinned, actual = read_kernel_version(), git_describe(src)
-    if pinned and actual and pinned != actual:
-        print(f"warning: KERNEL_VERSION is {pinned} but {src} is at {actual}", file=sys.stderr)
+    if pinned and pinned != actual:
+        where = f"is at {actual}" if actual else "is not at an exact tag (or not a git tree)"
+        print(f"warning: KERNEL_VERSION is {pinned} but {src} {where}; "
+              f"line numbers will not match {pinned}", file=sys.stderr)
 
     entries, defs = [], {}
     for path in sorted(scan_root.rglob("*.c")) + sorted(scan_root.rglob("*.h")):
