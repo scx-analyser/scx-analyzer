@@ -1,34 +1,34 @@
-# Invariant I1 - calling context & locking requirements of sched_ext kfuncs.
+# Invariant family I1 - calling context & locking requirements of sched_ext kfuncs.
 #
-# Source of truth: Linux v7.1 (see KERNEL_VERSION), kernel/sched/ext.c,
-# kernel/sched/ext_idle.c, kernel/bpf/{verifier,btf}.c. Write-up: I1.md.
+# Source of truth: Linux v7.1 (commit below): kernel/sched/ext.c,
+# kernel/sched/ext_idle.c, kernel/bpf/{verifier,btf}.c,
+# Documentation/scheduler/sched-ext.rst. Write-up: I1.md.
 #
-# Granularity: one entry per kfunc set (or per group of kfuncs sharing the
-# same context rule / enforcement), with an explicit `applies_to` list. Every
-# sched_ext kfunc registered in v7.1 (59 unique names) appears in exactly one
-# entry; I1.13/I1.14 additionally apply to all of them ("*").
+# Granularity: one entry per kfunc set (or per group of kfuncs sharing the same
+# context rule / enforcement), with an explicit `applies_to` list. Every sched_ext
+# kfunc registered in v7.1 (59 unique names) appears in exactly one entry;
+# I1.bpf_spin_lock.no_calls and I1.prog_type.gate additionally apply to all ("*").
 #
-# Conventions used in this file (to be reconciled with the A2 schema):
-# - requires.contexts: "ops.<cb>" = BPF program attached to that sched_ext_ops
-#   member; "prog:SYSCALL" / "prog:TRACING" = non-struct_ops BPF program
-#   types; "SCX_KF_ALLOW_*" = the per-op allow flag (ext.c:9815) that grants
-#   the set. "UNLOCKED ops" are the ops mapped to SCX_KF_ALLOW_UNLOCKED in
-#   scx_kf_allow_flags[] (ext.c:9828-9850).
-# - requires.locks: symbolic lock state the kfunc relies on:
-#   rq(this_cpu), rq(task_rq(p)), pi_lock(p), dsq(<which>), irqs_disabled,
-#   no_bpf_spin_lock, none.
-# - enforcement_expected: "static" = BPF verifier (kfunc set registration per
-#   prog type + scx_kfunc_context_filter() .filter callback, KF_* flags);
-#   "runtime" = an explicit check in the kfunc that calls scx_error() (aborts
-#   the BPF scheduler) or refuses the call. lockdep_assert_*() is debug-only
-#   (CONFIG_LOCKDEP) and is listed in references with note "lockdep" but is
-#   NOT counted as runtime enforcement.
-# - NOTE: v7.1 no longer has current->scx.kf_mask / scx_kf_allowed(); per-op
-#   context restriction is entirely verify-time (ext.c:9808-9918).
+# Conventions:
+# - "UNLOCKED ops" = the callbacks mapped to SCX_KF_ALLOW_UNLOCKED in
+#   scx_kf_allow_flags[] (ext.c:9833-9849): init_task, dump, cgroup_init,
+#   cgroup_exit, cgroup_prep_move, cgroup_cancel_move, cgroup_set_weight,
+#   cgroup_set_bandwidth, cgroup_set_idle, sub_attach, sub_detach, cpu_online,
+#   cpu_offline, init, exit.
+# - lock `rq` = the rq the callback was invoked for (this CPU's rq for
+#   dispatch/cpu_release/cpu_acquire); `task_rq` = rq of the task argument.
+#   `bpf_spin_lock` = a BPF-program-held bpf_spin_lock (verifier state).
+# - enforcement.expected counts only checks active in production kernels:
+#   lockdep_assert_*() is listed as mechanism `lockdep` but does not by itself
+#   make an entry "runtime".
+# - v7.1 has no current->scx.kf_mask / scx_kf_allowed(); mechanism kf_mask is
+#   never used. Per-op context restriction is verifier-time (ext.c:9808-9918).
 kernel_version: "v7.1"
+kernel_commit: 8cd9520d35a6c38db6567e97dd93b1f11f185dc6
 invariants:
-  - id: I1.1
-    title: "DSQ insertion kfuncs (enqueue_dispatch set) are callable only from ops.select_cpu/ops.enqueue/ops.dispatch"
+  - id: I1.dsq_insert.context
+    family: I1
+    title: "DSQ insertion kfuncs (enqueue_dispatch set) are callable only from ops.select_cpu, ops.enqueue and ops.dispatch"
     description: >-
       scx_kfunc_ids_enqueue_dispatch is granted by SCX_KF_ALLOW_ENQUEUE, which
       scx_kf_allow_flags[] gives to select_cpu, enqueue and dispatch. From
@@ -38,38 +38,54 @@ invariants:
       buffer (bounded by dispatch_max_batch, runtime-checked). Locks held by
       the caller: select_cpu -> pi_lock(p), no rq lock; enqueue ->
       rq(task_rq(p)); dispatch -> rq(this_cpu). The kfunc itself only asserts
-      irqs are disabled (lockdep). In ops.dispatch it writes p->scx.slice of
-      an arbitrary task (ext.c:8207-8210) without holding that task's rq lock
-      - not checked.
+      irqs are disabled (lockdep).
     category: context_locking
+    status: source_verified
     objects:
-      - {struct: bpf_prog_aux, fields: [attach_st_ops_member_off, st_ops]}
-      - {struct: "percpu", fields: [direct_dispatch_task]}
       - {struct: scx_dsp_ctx, fields: [cursor, buf]}
       - {struct: task_struct, fields: [scx.ddsp_dsq_id, scx.ddsp_enq_flags, scx.slice, scx.dsq_vtime]}
     access: write
     requires:
-      contexts: [ops.select_cpu, ops.enqueue, ops.dispatch, SCX_KF_ALLOW_ENQUEUE]
-      locks: [irqs_disabled, no_bpf_spin_lock]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_enqueue_dispatch]
+        callbacks: [ops.select_cpu, ops.enqueue, ops.dispatch]
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS]
+      locks:
+        - {lock: irqs_disabled, state: held, where: access_site, note: "lockdep_assert_irqs_disabled() in scx_dsq_insert_preamble()"}
+        - {lock: pi_lock, state: held, where: callback_entry, callbacks: [ops.select_cpu], note: "try_to_wake_up() holds p->pi_lock; SCX_CALL_OP_TASK_RET(select_cpu, NULL) - no rq lock"}
+        - {lock: task_rq, state: held, where: callback_entry, callbacks: [ops.enqueue], note: "do_enqueue_task()"}
+        - {lock: rq, state: held, where: callback_entry, callbacks: [ops.dispatch], note: "this CPU's rq, balance_one()/scx_dispatch_sched()"}
+        - {lock: bpf_spin_lock, state: not_held, where: access_site}
       predicates:
-        - "in ops.select_cpu/ops.enqueue: p == __this_cpu_read(direct_dispatch_task) and not already direct-dispatched"
-        - "in ops.dispatch: dsp_ctx.cursor < sch->dsp_max_batch"
+        - expr: "p == __this_cpu_read(direct_dispatch_task)"
+          checked_by: [mark_direct_dispatch]
+          on_failure: error
+          note: "only in ops.select_cpu/ops.enqueue (direct dispatch); also errors if already direct-dispatched"
+        - expr: "dspc->cursor < sch->dsp_max_batch"
+          checked_by: [scx_dsq_insert_commit]
+          on_failure: error
+          note: "ops.dispatch path"
     applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, __scx_bpf_dsq_insert_vtime, scx_bpf_dsq_insert_vtime]
-    enforcement_expected: static+runtime
+    enforcement:
+      expected: static+runtime
+      mechanisms: [kfunc_set, verifier, scx_error, lockdep]
+      sites:
+        - {file: kernel/sched/ext.c, line: 8331, end_line: 8336, symbol: scx_kfunc_ids_enqueue_dispatch}
+        - {file: kernel/sched/ext.c, line: 9936, end_line: 9937, symbol: scx_init, note: "registered for BPF_PROG_TYPE_STRUCT_OPS only"}
+        - {file: kernel/sched/ext.c, line: 9912, symbol: scx_kfunc_context_filter, note: "in_enqueue && SCX_KF_ALLOW_ENQUEUE"}
+        - {file: kernel/sched/ext.c, line: 1779, symbol: mark_direct_dispatch, note: "scx_error if p != ddsp_task"}
+        - {file: kernel/sched/ext.c, line: 8138, end_line: 8140, symbol: scx_dsq_insert_commit, note: "scx_error 'dispatch buffer overflow'"}
+        - {file: kernel/sched/ext.c, line: 8102, symbol: scx_dsq_insert_preamble, note: "lockdep_assert_irqs_disabled()"}
     references:
-      - {file: kernel/sched/ext.c, line: 8331, note: "BTF_KFUNCS_START(scx_kfunc_ids_enqueue_dispatch) (8331-8336)"}
-      - {file: kernel/sched/ext.c, line: 9936, note: "registered for BPF_PROG_TYPE_STRUCT_OPS only"}
-      - {file: kernel/sched/ext.c, line: 9829, note: "scx_kf_allow_flags[]: select_cpu, enqueue, dispatch carry SCX_KF_ALLOW_ENQUEUE (9829-9831)"}
-      - {file: kernel/sched/ext.c, line: 9912, note: "scx_kfunc_context_filter(): in_enqueue && SCX_KF_ALLOW_ENQUEUE"}
-      - {file: kernel/sched/ext.c, line: 3334, note: "select_task_rq_scx() sets direct_dispatch_task=p, calls ops.select_cpu with locked_rq=NULL (3339)"}
-      - {file: kernel/sched/ext.c, line: 1948, note: "do_enqueue_task(): SCX_CALL_OP_TASK(enqueue, rq)"}
-      - {file: kernel/sched/ext.c, line: 2840, note: "scx_dispatch_sched(): SCX_CALL_OP(dispatch, rq) (also 2844)"}
-      - {file: kernel/sched/ext.c, line: 1779, note: "mark_direct_dispatch(): scx_error if p != ddsp_task (runtime)"}
-      - {file: kernel/sched/ext.c, line: 8138, note: "scx_dsq_insert_commit(): scx_error 'dispatch buffer overflow' (runtime)"}
-      - {file: kernel/sched/ext.c, line: 8102, note: "lockdep_assert_irqs_disabled() (lockdep)"}
-      - {file: kernel/sched/ext.c, line: 8207, note: "writes p->scx.slice without asserting p's rq lock (unenforced)"}
+      - {file: kernel/sched/ext.c, line: 9829, end_line: 9831, symbol: scx_kf_allow_flags, note: "select_cpu, enqueue, dispatch carry SCX_KF_ALLOW_ENQUEUE"}
+      - {file: kernel/sched/ext.c, line: 3334, end_line: 3339, symbol: select_task_rq_scx, note: "sets direct_dispatch_task=p, calls ops.select_cpu with locked_rq=NULL"}
+      - {file: kernel/sched/ext.c, line: 1948, symbol: do_enqueue_task, note: "SCX_CALL_OP_TASK(enqueue, rq)"}
+      - {file: kernel/sched/ext.c, line: 2840, end_line: 2844, symbol: scx_dispatch_sched, note: "SCX_CALL_OP(dispatch, rq)"}
+      - {file: kernel/sched/ext.c, line: 8207, end_line: 8210, symbol: scx_bpf_dsq_insert___v2, note: "writes p->scx.slice without asserting p's rq lock (unenforced in ops.dispatch)"}
+    notes: "Gap: from ops.dispatch, p->scx.slice of an arbitrary task is written without that task's rq lock (ext.c:8207). direct_dispatch_task is a plain per-CPU variable (not a struct field)."
 
-  - id: I1.2
+  - id: I1.dispatch_only.context
+    family: I1
     title: "Dispatch-only kfuncs (dispatch set minus dsq_move*) are callable only from ops.dispatch"
     description: >-
       scx_kfunc_ids_dispatch is granted by SCX_KF_ALLOW_DISPATCH, which only
@@ -80,26 +96,36 @@ invariants:
       runtime context check; scx_bpf_dsq_move_to_local() may drop/retake rq
       locks and must not run under a BPF spin lock.
     category: context_locking
+    status: source_verified
     objects:
       - {struct: scx_dsp_ctx, fields: [rq, cursor, nr_tasks]}
       - {struct: rq, fields: [scx.flags, scx.local_dsq]}
     access: rw
     requires:
-      contexts: [ops.dispatch, SCX_KF_ALLOW_DISPATCH]
-      locks: ["rq(this_cpu)", no_bpf_spin_lock]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_dispatch]
+        callbacks: [ops.dispatch]
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS]
+      locks:
+        - {lock: rq, state: held, where: callback_entry, note: "this CPU's rq; SCX_RQ_IN_BALANCE set"}
+        - {lock: bpf_spin_lock, state: not_held, where: access_site}
     applies_to: [scx_bpf_dispatch_nr_slots, scx_bpf_dispatch_cancel, scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2, scx_bpf_sub_dispatch]
-    enforcement_expected: static
+    enforcement:
+      expected: static
+      mechanisms: [kfunc_set, verifier]
+      sites:
+        - {file: kernel/sched/ext.c, line: 8696, end_line: 8709, symbol: scx_kfunc_ids_dispatch, note: "scx_bpf_sub_dispatch only with CONFIG_EXT_SUB_SCHED"}
+        - {file: kernel/sched/ext.c, line: 9938, end_line: 9939, symbol: scx_init, note: "registered for BPF_PROG_TYPE_STRUCT_OPS only"}
+        - {file: kernel/sched/ext.c, line: 9910, symbol: scx_kfunc_context_filter}
     references:
-      - {file: kernel/sched/ext.c, line: 8696, note: "BTF_KFUNCS_START(scx_kfunc_ids_dispatch) (8696-8709); scx_bpf_sub_dispatch only with CONFIG_EXT_SUB_SCHED"}
-      - {file: kernel/sched/ext.c, line: 9938, note: "registered for BPF_PROG_TYPE_STRUCT_OPS only"}
-      - {file: kernel/sched/ext.c, line: 9831, note: "only ops.dispatch has SCX_KF_ALLOW_DISPATCH"}
-      - {file: kernel/sched/ext.c, line: 9910, note: "filter check"}
-      - {file: kernel/sched/ext.c, line: 2890, note: "balance_one(): lockdep_assert_rq_held + sets SCX_RQ_IN_BALANCE before dispatch"}
-      - {file: kernel/sched/ext.c, line: 8689, note: "scx_bpf_sub_dispatch() re-enters scx_dispatch_sched() on this_rq"}
-      - {file: kernel/sched/ext.c, line: 8484, note: "dispatch_cancel: scx_error on underflow (state check, not a context check)"}
-      - {file: kernel/sched/ext.c, line: 8530, note: "move_to_local uses dspc->rq; no runtime check that we are inside ops.dispatch"}
+      - {file: kernel/sched/ext.c, line: 9831, symbol: scx_kf_allow_flags, note: "only ops.dispatch has SCX_KF_ALLOW_DISPATCH"}
+      - {file: kernel/sched/ext.c, line: 2890, end_line: 2891, symbol: balance_one, note: "lockdep_assert_rq_held + sets SCX_RQ_IN_BALANCE before dispatch"}
+      - {file: kernel/sched/ext.c, line: 8689, symbol: scx_bpf_sub_dispatch, note: "re-enters scx_dispatch_sched() on this_rq"}
+      - {file: kernel/sched/ext.c, line: 8484, symbol: scx_bpf_dispatch_cancel, note: "scx_error on underflow (state check, not a context check)"}
+      - {file: kernel/sched/ext.c, line: 8530, symbol: scx_bpf_dsq_move_to_local___v2, note: "uses dspc->rq; no runtime check that we are inside ops.dispatch"}
 
-  - id: I1.3
+  - id: I1.dsq_move.context
+    family: I1
     title: "DSQ-iterator move kfuncs are callable from ops.dispatch or rq-unlocked contexts (UNLOCKED ops, SYSCALL)"
     description: >-
       scx_bpf_dsq_move* are members of both the dispatch and unlocked sets, so
@@ -111,51 +137,72 @@ invariants:
       task_rq(p) itself, then dsq->lock. Correctness depends on the static
       rule that the only rq-locked caller is ops.dispatch.
     category: context_locking
+    status: source_verified
     objects:
       - {struct: bpf_iter_scx_dsq_kern, fields: [dsq, cursor.flags, slice, vtime]}
-      - {struct: rq, fields: [scx.flags]}
+      - {struct: rq, fields: [scx.flags], access: read}
       - {struct: task_struct, fields: [scx.slice, scx.dsq_vtime]}
     access: write
     requires:
-      contexts: [ops.dispatch, "UNLOCKED ops (init_task, dump, cgroup_init, cgroup_exit, cgroup_prep_move, cgroup_cancel_move, cgroup_set_weight, cgroup_set_bandwidth, cgroup_set_idle, sub_attach, sub_detach, cpu_online, cpu_offline, init, exit)", "prog:SYSCALL", SCX_KF_ALLOW_DISPATCH, SCX_KF_ALLOW_UNLOCKED]
-      locks: ["rq(this_cpu) iff SCX_RQ_IN_BALANCE else none", no_bpf_spin_lock]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_dispatch, scx_kfunc_ids_unlocked]
+        callbacks: [ops.dispatch, ops.init_task, ops.dump, ops.cgroup_init, ops.cgroup_exit, ops.cgroup_prep_move, ops.cgroup_cancel_move, ops.cgroup_set_weight, ops.cgroup_set_bandwidth, ops.cgroup_set_idle, ops.sub_attach, ops.sub_detach, ops.cpu_online, ops.cpu_offline, ops.init, ops.exit]
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL]
+      locks:
+        - {lock: rq, state: held, where: callback_entry, callbacks: [ops.dispatch], note: "iff SCX_RQ_IN_BALANCE"}
+        - {lock: rq, state: not_held, where: callback_entry, callbacks: [ops.init_task, ops.dump, ops.cgroup_init, ops.cgroup_exit, ops.cgroup_prep_move, ops.cgroup_cancel_move, ops.cgroup_set_weight, ops.cgroup_set_bandwidth, ops.cgroup_set_idle, ops.sub_attach, ops.sub_detach, ops.cpu_online, ops.cpu_offline, ops.init, ops.exit]}
+        - {lock: bpf_spin_lock, state: not_held, where: access_site}
     applies_to: [scx_bpf_dsq_move_set_slice, scx_bpf_dsq_move_set_vtime, scx_bpf_dsq_move, scx_bpf_dsq_move_vtime]
-    enforcement_expected: static
+    enforcement:
+      expected: static
+      mechanisms: [kfunc_set, verifier]
+      sites:
+        - {file: kernel/sched/ext.c, line: 8701, end_line: 8705, symbol: scx_kfunc_ids_dispatch}
+        - {file: kernel/sched/ext.c, line: 8816, end_line: 8820, symbol: scx_kfunc_ids_unlocked}
+        - {file: kernel/sched/ext.c, line: 9944, end_line: 9945, symbol: scx_init, note: "unlocked set also registered for BPF_PROG_TYPE_SYSCALL"}
+        - {file: kernel/sched/ext.c, line: 9878, symbol: scx_kfunc_context_filter, note: "SYSCALL progs: unlocked/select_cpu/idle/any allowed"}
     references:
-      - {file: kernel/sched/ext.c, line: 8701, note: "dispatch set membership (8702-8705)"}
-      - {file: kernel/sched/ext.c, line: 8816, note: "unlocked set membership (8817-8820)"}
-      - {file: kernel/sched/ext.c, line: 9944, note: "unlocked set also registered for BPF_PROG_TYPE_SYSCALL"}
-      - {file: kernel/sched/ext.c, line: 9878, note: "SYSCALL progs: unlocked/select_cpu/idle/any allowed"}
-      - {file: kernel/sched/ext.c, line: 8389, note: "in_balance = this_rq->scx.flags & SCX_RQ_IN_BALANCE decides lock dance (8389-8398)"}
-      - {file: kernel/sched/ext.c, line: 8615, note: "doc: 'ops.dispatch() or any BPF context which doesn't hold a rq lock'"}
+      - {file: kernel/sched/ext.c, line: 8389, end_line: 8398, symbol: scx_dsq_move, note: "in_balance decides lock dance"}
+      - {file: kernel/sched/ext.c, line: 8615, symbol: scx_bpf_dsq_move, note: "kernel-doc: ops.dispatch() or any BPF context which doesn't hold a rq lock"}
 
-  - id: I1.4
+  - id: I1.cpu_release.context
+    family: I1
     title: "scx_bpf_reenqueue_local (legacy) is callable only from ops.cpu_release"
     description: >-
       The cpu_release set contains only the legacy scx_bpf_reenqueue_local();
       SCX_KF_ALLOW_CPU_RELEASE is given only to ops.cpu_release, which is
       called from switch_class() with the local rq lock held. The kfunc
       assumes the rq of smp_processor_id() is locked (lockdep only). The
-      ___v2 replacement is in the `any` set (I1.8) and defers the work.
+      ___v2 replacement is in the `any` set (I1.any.context) and defers work.
     category: context_locking
+    status: source_verified
     objects:
       - {struct: rq, fields: [scx.local_dsq]}
     access: rw
     requires:
-      contexts: [ops.cpu_release, SCX_KF_ALLOW_CPU_RELEASE]
-      locks: ["rq(this_cpu)"]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_cpu_release]
+        callbacks: [ops.cpu_release]
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS]
+      locks:
+        - {lock: rq, state: held, where: callback_entry, note: "this CPU's rq, switch_class()"}
     applies_to: [scx_bpf_reenqueue_local]
-    enforcement_expected: static
+    enforcement:
+      expected: static
+      mechanisms: [kfunc_set, verifier, lockdep]
+      sites:
+        - {file: kernel/sched/ext.c, line: 8745, end_line: 8747, symbol: scx_kfunc_ids_cpu_release}
+        - {file: kernel/sched/ext.c, line: 9908, symbol: scx_kfunc_context_filter}
+        - {file: kernel/sched/ext.c, line: 8738, symbol: scx_bpf_reenqueue_local, note: "lockdep_assert_rq_held(this cpu rq)"}
     references:
-      - {file: kernel/sched/ext.c, line: 8745, note: "BTF_KFUNCS_START(scx_kfunc_ids_cpu_release)"}
-      - {file: kernel/sched/ext.c, line: 9832, note: "only ops.cpu_release has SCX_KF_ALLOW_CPU_RELEASE"}
-      - {file: kernel/sched/ext.c, line: 3054, note: "switch_class(): SCX_CALL_OP(cpu_release, rq)"}
-      - {file: kernel/sched/ext.c, line: 8738, note: "lockdep_assert_rq_held(this cpu rq) (lockdep)"}
+      - {file: kernel/sched/ext.c, line: 9832, symbol: scx_kf_allow_flags, note: "only ops.cpu_release has SCX_KF_ALLOW_CPU_RELEASE"}
+      - {file: kernel/sched/ext.c, line: 3054, symbol: switch_class, note: "SCX_CALL_OP(cpu_release, rq)"}
 
-  - id: I1.5
+  - id: I1.create_dsq.sleepable
+    family: I1
     title: "scx_bpf_create_dsq is callable only from sleepable UNLOCKED ops or SYSCALL programs"
     description: >-
-      Member of the unlocked set with KF_SLEEPABLE. Filter restricts it to
+      Member of the unlocked set with KF_SLEEPABLE. The filter restricts it to
       SCX_KF_ALLOW_UNLOCKED ops and SYSCALL progs; the verifier additionally
       requires a sleepable program, and bpf_scx_check_member() only allows
       sleepable programs on init_task, cgroup_init, cgroup_exit,
@@ -164,81 +211,118 @@ invariants:
       UNLOCKED ops, create_dsq is effectively unusable there. Allocates with
       GFP_KERNEL.
     category: context_locking
+    status: source_verified
     objects:
       - {struct: scx_sched, fields: [dsq_hash]}
     access: write
     requires:
-      contexts: [ops.init_task, ops.cgroup_init, ops.cgroup_exit, ops.cgroup_prep_move, ops.cpu_online, ops.cpu_offline, ops.init, ops.exit, ops.sub_attach, ops.sub_detach, "prog:SYSCALL", SCX_KF_ALLOW_UNLOCKED]
-      locks: [none]
-      predicates: ["prog->sleepable"]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_unlocked]
+        callbacks: [ops.init_task, ops.cgroup_init, ops.cgroup_exit, ops.cgroup_prep_move, ops.cpu_online, ops.cpu_offline, ops.init, ops.exit, ops.sub_attach, ops.sub_detach]
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL]
+      locks:
+        - {lock: rq, state: not_held, where: callback_entry}
+      predicates:
+        - expr: "prog->sleepable"
+          checked_by: [check_kfunc_call, bpf_scx_check_member]
+          on_failure: error
+          note: "verifier rejects the program (load fails), not a runtime scx_error"
     applies_to: [scx_bpf_create_dsq]
-    enforcement_expected: static
+    enforcement:
+      expected: static
+      mechanisms: [kfunc_set, verifier]
+      sites:
+        - {file: kernel/sched/ext.c, line: 8815, symbol: scx_kfunc_ids_unlocked, note: "KF_IMPLICIT_ARGS | KF_SLEEPABLE"}
+        - {file: kernel/sched/ext.c, line: 9906, symbol: scx_kfunc_context_filter, note: "SCX_KF_ALLOW_UNLOCKED && in_unlocked"}
+        - {file: kernel/sched/ext.c, line: 7609, end_line: 7631, symbol: bpf_scx_check_member, note: "sleepable only for listed ops"}
+        - {file: kernel/bpf/verifier.c, line: 13053, end_line: 13055, note: "'program must be sleepable to call sleepable kfunc'"}
     references:
-      - {file: kernel/sched/ext.c, line: 8815, note: "KF_IMPLICIT_ARGS | KF_SLEEPABLE in scx_kfunc_ids_unlocked"}
-      - {file: kernel/sched/ext.c, line: 9906, note: "filter: SCX_KF_ALLOW_UNLOCKED && in_unlocked"}
-      - {file: kernel/sched/ext.c, line: 7609, note: "bpf_scx_check_member(): sleepable only for listed ops (7615-7631)"}
-      - {file: kernel/bpf/verifier.c, line: 13053, note: "'program must be sleepable to call sleepable kfunc'"}
-      - {file: kernel/sched/ext.c, line: 8779, note: "kmalloc_node(GFP_KERNEL)"}
+      - {file: kernel/sched/ext.c, line: 8779, symbol: scx_bpf_create_dsq, note: "kmalloc_node(GFP_KERNEL)"}
 
-  - id: I1.6
+  - id: I1.select_cpu.context
+    family: I1
     title: "select_cpu kfuncs are callable from ops.select_cpu/ops.enqueue (on the subject task) or rq-unlocked contexts"
     description: >-
       Members of scx_kfunc_ids_select_cpu (ext_idle.c) and of the unlocked set.
       Allowed in ops.select_cpu and ops.enqueue (SCX_KF_ALLOW_SELECT_CPU), all
       UNLOCKED ops and SYSCALL programs; kept out of TRACING because they may
-      take p->pi_lock. Runtime, select_cpu_from_kfunc() requires the lock
+      take p->pi_lock. At runtime select_cpu_from_kfunc() requires the lock
       protecting p->cpus_ptr: inside ops.select_cpu p must be kf_tasks[0]
       (pi_lock held by try_to_wake_up); inside another rq-locked op
       task_rq(p) must equal scx_locked_rq() (else scx_error "cross-task");
       otherwise it takes pi_lock itself.
     category: context_locking
+    status: source_verified
     objects:
-      - {struct: task_struct, fields: [scx.kf_tasks, cpus_ptr, nr_cpus_allowed, pi_lock]}
+      - {struct: task_struct, fields: [scx.kf_tasks, cpus_ptr, nr_cpus_allowed]}
       - {struct: rq, fields: [scx.in_select_cpu]}
-      - {struct: "percpu", fields: [scx_locked_rq_state]}
     access: read
     requires:
-      contexts: [ops.select_cpu, ops.enqueue, "UNLOCKED ops", "prog:SYSCALL", SCX_KF_ALLOW_SELECT_CPU, SCX_KF_ALLOW_UNLOCKED]
-      locks: ["pi_lock(p) (ops.select_cpu)", "rq(task_rq(p)) (ops.enqueue)", "none -> takes pi_lock(p) (unlocked)"]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_select_cpu, scx_kfunc_ids_unlocked]
+        callbacks: [ops.select_cpu, ops.enqueue, ops.init_task, ops.dump, ops.cgroup_init, ops.cgroup_exit, ops.cgroup_prep_move, ops.cgroup_cancel_move, ops.cgroup_set_weight, ops.cgroup_set_bandwidth, ops.cgroup_set_idle, ops.sub_attach, ops.sub_detach, ops.cpu_online, ops.cpu_offline, ops.init, ops.exit]
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL]
+      locks:
+        - {lock: pi_lock, state: held, where: callback_entry, callbacks: [ops.select_cpu]}
+        - {lock: task_rq, state: held, where: callback_entry, callbacks: [ops.enqueue]}
+        - {lock: pi_lock, state: held, where: access_site, note: "taken by select_cpu_from_kfunc() itself when no lock is held"}
       predicates:
-        - "this_rq()->scx.in_select_cpu => p in current->scx.kf_tasks[]"
-        - "scx_locked_rq() != NULL => task_rq(p) == scx_locked_rq()"
+        - expr: "!this_rq()->scx.in_select_cpu || p == current->scx.kf_tasks[0] || p == current->scx.kf_tasks[1]"
+          checked_by: [select_cpu_from_kfunc, scx_kf_arg_task_ok]
+          on_failure: error
+        - expr: "!scx_locked_rq() || task_rq(p) == scx_locked_rq()"
+          checked_by: [select_cpu_from_kfunc]
+          on_failure: error
     applies_to: [__scx_bpf_select_cpu_and, scx_bpf_select_cpu_and, scx_bpf_select_cpu_dfl]
-    enforcement_expected: static+runtime
+    enforcement:
+      expected: static+runtime
+      mechanisms: [kfunc_set, verifier, scx_error, lock, lockdep]
+      sites:
+        - {file: kernel/sched/ext_idle.c, line: 1499, end_line: 1503, symbol: scx_kfunc_ids_select_cpu}
+        - {file: kernel/sched/ext.c, line: 8821, end_line: 8824, symbol: scx_kfunc_ids_unlocked}
+        - {file: kernel/sched/ext_idle.c, line: 1518, end_line: 1519, symbol: scx_idle_init, note: "registered for STRUCT_OPS and SYSCALL only"}
+        - {file: kernel/sched/ext.c, line: 9914, symbol: scx_kfunc_context_filter}
+        - {file: kernel/sched/ext_idle.c, line: 940, end_line: 943, symbol: select_cpu_from_kfunc, note: "scx_kf_arg_task_ok() + lockdep_assert_held(pi_lock)"}
+        - {file: kernel/sched/ext_idle.c, line: 944, end_line: 946, symbol: select_cpu_from_kfunc, note: "cross_task scx_error at 974-977"}
+        - {file: kernel/sched/ext_idle.c, line: 948, symbol: select_cpu_from_kfunc, note: "unlocked: raw_spin_lock_irqsave(&p->pi_lock)"}
+        - {file: kernel/sched/ext.c, line: 549, end_line: 559, symbol: scx_kf_arg_task_ok}
     references:
-      - {file: kernel/sched/ext_idle.c, line: 1499, note: "BTF_KFUNCS_START(scx_kfunc_ids_select_cpu); comment 1487-1497 on keeping out of TRACING"}
-      - {file: kernel/sched/ext.c, line: 8821, note: "also in scx_kfunc_ids_unlocked (8822-8824)"}
-      - {file: kernel/sched/ext_idle.c, line: 1518, note: "registered for STRUCT_OPS and SYSCALL only"}
-      - {file: kernel/sched/ext.c, line: 9829, note: "select_cpu and enqueue carry SCX_KF_ALLOW_SELECT_CPU"}
-      - {file: kernel/sched/ext.c, line: 3338, note: "in_select_cpu=true around ops.select_cpu"}
-      - {file: kernel/sched/ext_idle.c, line: 940, note: "scx_kf_arg_task_ok() + lockdep_assert_held(pi_lock) (940-943)"}
-      - {file: kernel/sched/ext_idle.c, line: 944, note: "task_rq(p) != scx_locked_rq() -> cross_task scx_error (974-977)"}
-      - {file: kernel/sched/ext_idle.c, line: 948, note: "unlocked: raw_spin_lock_irqsave(&p->pi_lock)"}
-      - {file: kernel/sched/ext.c, line: 549, note: "scx_kf_arg_task_ok(): scx_error 'called on a task not being operated on'"}
+      - {file: kernel/sched/ext_idle.c, line: 1487, end_line: 1497, note: "comment: keep select_cpu kfuncs out of TRACING"}
+      - {file: kernel/sched/ext.c, line: 9829, end_line: 9830, symbol: scx_kf_allow_flags, note: "select_cpu and enqueue carry SCX_KF_ALLOW_SELECT_CPU"}
+      - {file: kernel/sched/ext.c, line: 3338, end_line: 3340, symbol: select_task_rq_scx, note: "in_select_cpu=true around ops.select_cpu"}
+    notes: "Stale comment at ext_idle.c:934 lists non-SCX struct_ops as an unlocked caller; the filter rejects them (ext.c:9896)."
 
-  - id: I1.7
+  - id: I1.idle.context
+    family: I1
     title: "Idle-tracking kfuncs are context-insensitive: callable from any SCX op, SYSCALL and TRACING programs"
     description: >-
       scx_kfunc_ids_idle is registered for STRUCT_OPS, TRACING and SYSCALL; the
       filter allows it from every sched_ext op (in_idle short-circuit) and any
-      non-struct_ops prog type it is registered for. No lock is required;
-      the cpumask helpers return refcounted (KF_ACQUIRE/KF_RELEASE) kptrs
-      checked by the verifier. Rejected only in non-SCX struct_ops.
+      non-struct_ops prog type it is registered for. No lock is required; the
+      cpumask helpers return refcounted (KF_ACQUIRE/KF_RELEASE) kptrs checked
+      by the verifier. Rejected only in non-SCX struct_ops.
     category: context_locking
+    status: source_verified
     objects:
       - {struct: scx_idle_cpus, fields: [cpu, smt]}
     access: rw
     requires:
-      contexts: ["any ops.*", "prog:TRACING", "prog:SYSCALL"]
-      locks: [none]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_idle]
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL, BPF_PROG_TYPE_TRACING]
     applies_to: [scx_bpf_cpu_node, scx_bpf_get_idle_cpumask_node, scx_bpf_get_idle_cpumask, scx_bpf_get_idle_smtmask_node, scx_bpf_get_idle_smtmask, scx_bpf_put_idle_cpumask, scx_bpf_test_and_clear_cpu_idle, scx_bpf_pick_idle_cpu_node, scx_bpf_pick_idle_cpu, scx_bpf_pick_any_cpu_node, scx_bpf_pick_any_cpu]
-    enforcement_expected: static
+    enforcement:
+      expected: static
+      mechanisms: [kfunc_set, verifier]
+      sites:
+        - {file: kernel/sched/ext_idle.c, line: 1468, end_line: 1480, symbol: scx_kfunc_ids_idle}
+        - {file: kernel/sched/ext_idle.c, line: 1515, end_line: 1517, symbol: scx_idle_init, note: "registered for STRUCT_OPS, TRACING, SYSCALL"}
+        - {file: kernel/sched/ext.c, line: 9900, symbol: scx_kfunc_context_filter, note: "in_any || in_idle -> allowed for every SCX op"}
     references:
-      - {file: kernel/sched/ext_idle.c, line: 1468, note: "BTF_KFUNCS_START(scx_kfunc_ids_idle) (1468-1480)"}
-      - {file: kernel/sched/ext_idle.c, line: 1515, note: "registered for STRUCT_OPS, TRACING, SYSCALL (1515-1517)"}
-      - {file: kernel/sched/ext.c, line: 9900, note: "filter: in_any || in_idle -> allowed for every SCX op"}
+      - {file: kernel/sched/ext.c, line: 9881, symbol: scx_kfunc_context_filter, note: "non-struct_ops progs: only any/idle"}
 
-  - id: I1.8
+  - id: I1.any.context
+    family: I1
     title: "Generic `any`-set kfuncs are callable from any SCX op, SYSCALL and TRACING programs without lock requirements"
     description: >-
       scx_kfunc_ids_any is registered for STRUCT_OPS, TRACING and SYSCALL and
@@ -249,53 +333,69 @@ invariants:
       checked. scx_bpf_cpu_rq is deprecated because it hands out an rq
       pointer without the rq lock.
     category: context_locking
+    status: source_verified
     objects:
       - {struct: rq, fields: [scx.cpus_to_kick, scx.local_dsq.nr, curr]}
       - {struct: scx_dispatch_q, fields: [lock, first_task, nr]}
     access: rw
     requires:
-      contexts: ["any ops.*", "prog:TRACING", "prog:SYSCALL"]
-      locks: [none]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_any]
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL, BPF_PROG_TYPE_TRACING]
     applies_to: [scx_bpf_kick_cpu, scx_bpf_dsq_nr_queued, scx_bpf_destroy_dsq, scx_bpf_dsq_peek, scx_bpf_dsq_reenq, scx_bpf_reenqueue_local___v2, bpf_iter_scx_dsq_new, bpf_iter_scx_dsq_next, bpf_iter_scx_dsq_destroy, scx_bpf_exit_bstr, scx_bpf_error_bstr, scx_bpf_cpuperf_cap, scx_bpf_cpuperf_cur, scx_bpf_nr_node_ids, scx_bpf_nr_cpu_ids, scx_bpf_get_possible_cpumask, scx_bpf_get_online_cpumask, scx_bpf_put_cpumask, scx_bpf_task_running, scx_bpf_task_cpu, scx_bpf_cpu_rq, scx_bpf_cpu_curr, scx_bpf_now, scx_bpf_events]
-    enforcement_expected: static
+    enforcement:
+      expected: static
+      mechanisms: [kfunc_set, verifier]
+      sites:
+        - {file: kernel/sched/ext.c, line: 9767, end_line: 9800, symbol: scx_kfunc_ids_any}
+        - {file: kernel/sched/ext.c, line: 9946, end_line: 9951, symbol: scx_init, note: "registered for STRUCT_OPS, TRACING, SYSCALL"}
+        - {file: kernel/sched/ext.c, line: 9881, symbol: scx_kfunc_context_filter, note: "non-struct_ops progs: only any/idle"}
     references:
-      - {file: kernel/sched/ext.c, line: 9767, note: "BTF_KFUNCS_START(scx_kfunc_ids_any) (9767-9800)"}
-      - {file: kernel/sched/ext.c, line: 9946, note: "registered for STRUCT_OPS, TRACING, SYSCALL (9946-9951)"}
-      - {file: kernel/sched/ext.c, line: 9881, note: "non-struct_ops progs: only any/idle"}
-      - {file: kernel/sched/ext.c, line: 8902, note: "scx_kick_cpu(): actual kick bounced to irq_work to avoid nesting rq locks"}
-      - {file: kernel/sched/ext.c, line: 9156, note: "scx_bpf_dsq_reenq: 'Can be called from anywhere' (asynchronous)"}
-      - {file: kernel/sched/ext.c, line: 9552, note: "scx_bpf_cpu_rq deprecated: unlocked rq pointer"}
+      - {file: kernel/sched/ext.c, line: 8902, end_line: 8904, symbol: scx_kick_cpu, note: "actual kick bounced to irq_work to avoid nesting rq locks"}
+      - {file: kernel/sched/ext.c, line: 9156, symbol: scx_bpf_dsq_reenq, note: "'Can be called from anywhere' (asynchronous)"}
+      - {file: kernel/sched/ext.c, line: 9552, end_line: 9557, symbol: scx_bpf_cpu_rq, note: "deprecated: unlocked rq pointer"}
 
-  - id: I1.9
+  - id: I1.locked_rq.runtime
+    family: I1
     title: "rq-lock-aware `any` kfuncs: scx_bpf_locked_rq requires a held rq; scx_bpf_cpuperf_set must target the held rq"
     description: >-
       Both read scx_locked_rq() (per-CPU scx_locked_rq_state, maintained by
       SCX_CALL_OP* from the locked_rq argument). scx_bpf_locked_rq()
       scx_error()s if no rq is locked. scx_bpf_cpuperf_set() scx_error()s if
       an rq is locked and the target CPU's rq differs (ABBA prevention), and
-      otherwise takes the target rq lock itself. Gap: scx_locked_rq_state is
-      only set by SCX_CALL_OP*; a TRACING program (allowed: `any` set) that
-      runs while the core scheduler holds an rq lock outside an SCX op sees
-      NULL and would rq_lock_irqsave() a possibly already-held rq.
+      otherwise takes the target rq lock itself.
     category: context_locking
+    status: source_verified
     objects:
-      - {struct: "percpu", fields: [scx_locked_rq_state]}
       - {struct: rq, fields: [scx.cpuperf_target]}
     access: rw
     requires:
-      contexts: ["any ops.*", "prog:TRACING", "prog:SYSCALL"]
-      locks: ["scx_locked_rq() != NULL (locked_rq)", "scx_locked_rq() == NULL || scx_locked_rq() == cpu_rq(cpu) (cpuperf_set)"]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_any]
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL, BPF_PROG_TYPE_TRACING]
+      predicates:
+        - expr: "scx_locked_rq() != NULL"
+          checked_by: [scx_bpf_locked_rq]
+          on_failure: error
+        - expr: "!scx_locked_rq() || cpu_rq(cpu) == scx_locked_rq()"
+          checked_by: [scx_bpf_cpuperf_set]
+          on_failure: error
     applies_to: [scx_bpf_locked_rq, scx_bpf_cpuperf_set]
-    enforcement_expected: runtime
+    enforcement:
+      expected: runtime
+      mechanisms: [scx_error, lock]
+      sites:
+        - {file: kernel/sched/ext.c, line: 9581, end_line: 9584, symbol: scx_bpf_locked_rq, note: "scx_error 'accessing rq without holding rq lock'"}
+        - {file: kernel/sched/ext.c, line: 9444, end_line: 9447, symbol: scx_bpf_cpuperf_set, note: "scx_error 'Invalid target CPU'"}
+        - {file: kernel/sched/ext.c, line: 9453, end_line: 9456, symbol: scx_bpf_cpuperf_set, note: "rq_lock_irqsave when no rq tracked as locked"}
     references:
-      - {file: kernel/sched/ext.c, line: 456, note: "DEFINE_PER_CPU scx_locked_rq_state"}
-      - {file: kernel/sched/ext.c, line: 465, note: "update_locked_rq(): lockdep_assert_rq_held (lockdep)"}
-      - {file: kernel/sched/ext.c, line: 474, note: "SCX_CALL_OP saves/restores locked rq around the op"}
-      - {file: kernel/sched/ext.c, line: 9581, note: "scx_bpf_locked_rq: scx_error 'accessing rq without holding rq lock'"}
-      - {file: kernel/sched/ext.c, line: 9444, note: "cpuperf_set: scx_error 'Invalid target CPU' if rq != locked_rq"}
-      - {file: kernel/sched/ext.c, line: 9453, note: "cpuperf_set: rq_lock_irqsave when no rq tracked as locked"}
+      - {file: kernel/sched/ext.c, line: 456, symbol: scx_locked_rq_state}
+      - {file: kernel/sched/ext.c, line: 465, end_line: 466, symbol: update_locked_rq, note: "lockdep_assert_rq_held"}
+      - {file: kernel/sched/ext.c, line: 474, end_line: 485, symbol: SCX_CALL_OP, note: "saves/restores locked rq around the op"}
+    notes: "Gap: scx_locked_rq_state is only set by SCX_CALL_OP*; a TRACING program running while the core holds an rq lock outside an SCX op sees NULL and cpuperf_set would rq_lock_irqsave() a possibly already-held rq (potential deadlock, needs a test)."
 
-  - id: I1.10
+  - id: I1.dump.context
+    family: I1
     title: "scx_bpf_dump_bstr is callable only during ops.dump/dump_cpu/dump_task"
     description: >-
       Statically in the `any` set; the restriction is a runtime check that the
@@ -304,21 +404,34 @@ invariants:
       irqs off) held, from irq_work or SysRq; dump_cpu/dump_task additionally
       hold the dumped CPU's rq lock.
     category: context_locking
+    status: source_verified
     objects:
       - {struct: scx_dump_data, fields: [cpu, cursor, buf]}
     access: write
     requires:
-      contexts: [ops.dump, ops.dump_cpu, ops.dump_task]
-      locks: ["scx_dump_lock", "rq(cpu) (dump_cpu, dump_task)"]
-      predicates: ["raw_smp_processor_id() == scx_dump_data.cpu"]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_any]
+        callbacks: [ops.dump, ops.dump_cpu, ops.dump_task]
+      locks:
+        - {lock: scx_dump_lock, state: held, where: callback_entry}
+        - {lock: rq, state: held, where: callback_entry, callbacks: [ops.dump_cpu, ops.dump_task], note: "rq of the dumped CPU"}
+      predicates:
+        - expr: "raw_smp_processor_id() == dd->cpu"
+          checked_by: [scx_bpf_dump_bstr]
+          on_failure: error
     applies_to: [scx_bpf_dump_bstr]
-    enforcement_expected: runtime
+    enforcement:
+      expected: runtime
+      mechanisms: [scx_error]
+      sites:
+        - {file: kernel/sched/ext.c, line: 9324, end_line: 9327, symbol: scx_bpf_dump_bstr, note: "scx_error 'must only be called from ops.dump() and friends'"}
     references:
-      - {file: kernel/sched/ext.c, line: 9324, note: "scx_error 'must only be called from ops.dump() and friends'"}
-      - {file: kernel/sched/ext.c, line: 6337, note: "scx_dump_state(): guard(raw_spinlock_irqsave)(&scx_dump_lock)"}
-      - {file: kernel/sched/ext.c, line: 6381, note: "rq_lock_irqsave before ops.dump_cpu/dump_task"}
+      - {file: kernel/sched/ext.c, line: 6337, symbol: scx_dump_state, note: "guard(raw_spinlock_irqsave)(&scx_dump_lock)"}
+      - {file: kernel/sched/ext.c, line: 6381, symbol: scx_dump_state, note: "rq_lock_irqsave before ops.dump_cpu/dump_task"}
+    notes: "Weak check: only the CPU number is compared; a TRACING program on the dumping CPU (e.g. NMI) passes."
 
-  - id: I1.11
+  - id: I1.task_cgroup.subject_task
+    family: I1
     title: "scx_bpf_task_cgroup may only be called on a task the current op operates on"
     description: >-
       @p must be current->scx.kf_tasks[0] or [1], i.e. the task argument of an
@@ -326,21 +439,33 @@ invariants:
       select_cpu, p's pi_lock), so that p->sched_task_group is stable.
       Otherwise scx_error() and the root cgroup is returned.
     category: context_locking
+    status: source_verified
     objects:
       - {struct: task_struct, fields: [scx.kf_tasks, sched_task_group]}
     access: read
     requires:
-      contexts: [ops.select_cpu, ops.enqueue, ops.dequeue, ops.runnable, ops.running, ops.stopping, ops.quiescent, ops.yield, ops.core_sched_before, ops.set_weight, ops.set_cpumask, ops.tick, ops.enable, ops.disable, ops.exit_task, ops.cgroup_move]
-      locks: ["rq(task_rq(p)) | pi_lock(p)"]
-      predicates: ["p == current->scx.kf_tasks[0] || p == current->scx.kf_tasks[1]"]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_any]
+        callbacks: [ops.select_cpu, ops.enqueue, ops.dequeue, ops.runnable, ops.running, ops.stopping, ops.quiescent, ops.yield, ops.core_sched_before, ops.set_weight, ops.set_cpumask, ops.tick, ops.enable, ops.disable, ops.exit_task, ops.cgroup_move]
+      locks:
+        - {lock: pi_lock, state: held, where: callback_entry, callbacks: [ops.select_cpu]}
+        - {lock: task_rq, state: held, where: callback_entry, callbacks: [ops.enqueue, ops.dequeue, ops.runnable, ops.running, ops.stopping, ops.quiescent, ops.yield, ops.core_sched_before, ops.set_weight, ops.set_cpumask, ops.tick, ops.enable, ops.disable, ops.exit_task, ops.cgroup_move]}
+      predicates:
+        - expr: "p == current->scx.kf_tasks[0] || p == current->scx.kf_tasks[1]"
+          checked_by: [scx_kf_arg_task_ok]
+          on_failure: error
     applies_to: [scx_bpf_task_cgroup]
-    enforcement_expected: runtime
+    enforcement:
+      expected: runtime
+      mechanisms: [scx_error]
+      sites:
+        - {file: kernel/sched/ext.c, line: 9754, symbol: scx_bpf_task_cgroup, note: "scx_kf_arg_task_ok()"}
     references:
-      - {file: kernel/sched/ext.c, line: 9798, note: "any set, CONFIG_CGROUP_SCHED only"}
-      - {file: kernel/sched/ext.c, line: 9754, note: "scx_kf_arg_task_ok()"}
-      - {file: kernel/sched/ext.c, line: 503, note: "SCX_CALL_OP_TASK*: kf_tasks[] protocol and lock guarantee (503-546)"}
+      - {file: kernel/sched/ext.c, line: 9798, symbol: scx_kfunc_ids_any, note: "CONFIG_CGROUP_SCHED only"}
+      - {file: kernel/sched/ext.c, line: 503, end_line: 546, symbol: SCX_CALL_OP_TASK, note: "kf_tasks[] protocol and lock guarantee"}
 
-  - id: I1.12
+  - id: I1.task_set.unlocked_write
+    family: I1
     title: "scx_bpf_task_set_slice / scx_bpf_task_set_dsq_vtime write task scheduling fields from any context without a lock"
     description: >-
       In the `any` set (so also TRACING/SYSCALL). They only check that the
@@ -349,39 +474,55 @@ invariants:
       check. Unenforced: concurrent with the core (e.g. slice refill in
       tick/dispatch) or with DSQ vtime ordering.
     category: context_locking
+    status: source_verified
     objects:
       - {struct: task_struct, fields: [scx.slice, scx.dsq_vtime]}
     access: write
     requires:
-      contexts: ["any ops.*", "prog:TRACING", "prog:SYSCALL"]
-      locks: [none]
-      predicates: ["scx_task_on_sched(sch, p)"]
+      contexts:
+        kfunc_sets: [scx_kfunc_ids_any]
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL, BPF_PROG_TYPE_TRACING]
+      locks:
+        - {lock: task_rq, state: held, where: access_site, note: "what would be needed for a stable write; NOT required or checked by the kernel"}
+      predicates:
+        - expr: "scx_task_on_sched(sch, p)"
+          checked_by: [scx_bpf_task_set_slice, scx_bpf_task_set_dsq_vtime]
+          on_failure: return
     applies_to: [scx_bpf_task_set_slice, scx_bpf_task_set_dsq_vtime]
-    enforcement_expected: none
+    enforcement:
+      expected: none
+      mechanisms: [none]
     references:
-      - {file: kernel/sched/ext.c, line: 8851, note: "only ownership check, then p->scx.slice = slice"}
-      - {file: kernel/sched/ext.c, line: 8874, note: "only ownership check, then p->scx.dsq_vtime = vtime"}
+      - {file: kernel/sched/ext.c, line: 8851, end_line: 8854, symbol: scx_bpf_task_set_slice, note: "only ownership check, then p->scx.slice = slice"}
+      - {file: kernel/sched/ext.c, line: 8874, end_line: 8877, symbol: scx_bpf_task_set_dsq_vtime, note: "only ownership check, then p->scx.dsq_vtime = vtime"}
 
-  - id: I1.13
+  - id: I1.bpf_spin_lock.no_calls
+    family: I1
     title: "No sched_ext kfunc may be called while the BPF program holds a bpf_spin_lock"
     description: >-
       The verifier rejects any call except spin_unlock/kptr_xchg and
       kfunc_spin_allowed() kfuncs while env->cur_state->active_locks is set.
-      None of the SCX kfuncs is spin-allowed. This is what
-      sched-ext.rst means by "cannot be called with any BPF locks held".
+      None of the SCX kfuncs is spin-allowed. This is what sched-ext.rst means
+      by "cannot be called with any BPF locks held".
     category: context_locking
-    objects:
-      - {struct: bpf_verifier_state, fields: [active_locks]}
-    access: read
+    status: source_verified
+    objects: []
+    access: none
     requires:
-      locks: [no_bpf_spin_lock]
+      locks:
+        - {lock: bpf_spin_lock, state: not_held, where: access_site}
     applies_to: ["*"]
-    enforcement_expected: static
+    enforcement:
+      expected: static
+      mechanisms: [verifier]
+      sites:
+        - {file: kernel/bpf/verifier.c, line: 17626, end_line: 17634, note: "'function calls are not allowed while holding a lock'"}
     references:
-      - {file: kernel/bpf/verifier.c, line: 17626, note: "'function calls are not allowed while holding a lock'"}
       - {file: Documentation/scheduler/sched-ext.rst, line: 373, note: "dsq_insert/move_to_local and BPF locks"}
+      - {file: kernel/sched/ext.c, line: 8181, symbol: scx_bpf_dsq_insert, note: "kernel-doc says no locking restrictions (docs drift)"}
 
-  - id: I1.14
+  - id: I1.prog_type.gate
+    family: I1
     title: "Program-type gate: SCX kfuncs are denied to non-SCX struct_ops; TRACING gets only any+idle; SYSCALL gets unlocked+select_cpu+idle+any"
     description: >-
       Applies to every SCX kfunc. Enforced by which hooks each set is
@@ -390,18 +531,25 @@ invariants:
       known (early kfunc collection) everything is allowed and the filter is
       re-run in do_check_main().
     category: context_locking
+    status: source_verified
     objects:
-      - {struct: bpf_prog, fields: [type, aux.st_ops, aux.attach_st_ops_member_off, sleepable]}
-    access: read
+      - {struct: bpf_prog, fields: [type, aux.st_ops, aux.attach_st_ops_member_off, sleepable], access: read}
+    access: none
     requires:
-      contexts: ["prog:STRUCT_OPS(sched_ext_ops)", "prog:SYSCALL", "prog:TRACING"]
+      contexts:
+        program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL, BPF_PROG_TYPE_TRACING]
     applies_to: ["*"]
-    enforcement_expected: static
+    enforcement:
+      expected: static
+      mechanisms: [kfunc_set, verifier]
+      sites:
+        - {file: kernel/sched/ext.c, line: 9860, end_line: 9918, symbol: scx_kfunc_context_filter}
+        - {file: kernel/sched/ext.c, line: 9936, end_line: 9951, symbol: scx_init, note: "set registration per program type"}
+        - {file: kernel/sched/ext_idle.c, line: 1515, end_line: 1519, symbol: scx_idle_init}
+        - {file: kernel/bpf/btf.c, line: 8864, end_line: 8867, symbol: __btf_kfunc_is_allowed, note: "any filter returning non-zero denies"}
+        - {file: kernel/bpf/verifier.c, line: 12612, note: "btf_kfunc_is_allowed() check at kfunc lookup"}
     references:
-      - {file: kernel/sched/ext.c, line: 9860, note: "scx_kfunc_context_filter() (9860-9918)"}
-      - {file: kernel/sched/ext.c, line: 9877, note: "SYSCALL rule"}
-      - {file: kernel/sched/ext.c, line: 9880, note: "TRACING (non-struct_ops) rule"}
-      - {file: kernel/sched/ext.c, line: 9890, note: "st_ops not set yet -> allow, re-checked later"}
-      - {file: kernel/sched/ext.c, line: 9896, note: "non-SCX struct_ops -> -EACCES"}
-      - {file: kernel/bpf/btf.c, line: 8864, note: "__btf_kfunc_is_allowed(): any filter returning non-zero denies"}
-      - {file: kernel/bpf/verifier.c, line: 12612, note: "btf_kfunc_is_allowed() check at kfunc lookup"}
+      - {file: kernel/sched/ext.c, line: 9877, end_line: 9878, symbol: scx_kfunc_context_filter, note: "SYSCALL rule"}
+      - {file: kernel/sched/ext.c, line: 9880, end_line: 9881, symbol: scx_kfunc_context_filter, note: "TRACING (non-struct_ops) rule"}
+      - {file: kernel/sched/ext.c, line: 9890, end_line: 9891, symbol: scx_kfunc_context_filter, note: "st_ops not set yet -> allow, re-checked later"}
+      - {file: kernel/sched/ext.c, line: 9896, end_line: 9897, symbol: scx_kfunc_context_filter, note: "non-SCX struct_ops -> -EACCES"}
