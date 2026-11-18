@@ -1,61 +1,262 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "scx-analyzer/catalog.schema.json",
-  "title": "Invariant catalog (owned by Epic A)",
+  "title": "Invariant catalog (owned by Epic A, consumed by Epics C and D)",
+  "description": "Invariants that sched_ext kfuncs must respect on the pinned kernel. Each entry states which shared state is touched, which context / lock / predicate / state-transition discipline protects it, which kfuncs it applies to and how the kernel is expected to enforce it, with file:line references. Epic C turns entries into checks over the call graph; Epic D joins findings and catalog/ground_truth.csv on (kfunc, invariant id).",
   "type": "object",
   "required": ["kernel_version", "invariants"],
   "additionalProperties": false,
   "properties": {
-    "kernel_version": {"type": "string"},
+    "kernel_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Kernel the entries were derived from. Must equal the kernel_version of the call graph and findings it is used with (the checker rejects mismatches)."
+    },
+    "kernel_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Full commit hash the references (file:line) were verified against."
+    },
+    "illustrative": {
+      "type": "boolean",
+      "description": "true for hand-written fixtures; mirrors callgraph.schema.json. Real catalog/invariants/*.yaml files omit it or set false."
+    },
     "invariants": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["id", "title", "category", "objects", "access", "requires", "applies_to", "enforcement_expected"],
-        "additionalProperties": false,
-        "properties": {
-          "id": {"type": "string", "pattern": "^I[0-9]+(\\.[0-9]+)?$", "description": "e.g. I1, I2.3"},
-          "title": {"type": "string"},
-          "description": {"type": "string"},
-          "category": {"enum": ["context_locking", "ownership_state", "argument_validity", "value_range"]},
-          "objects": {
-            "type": "array",
-            "description": "Shared state involved, as struct + field paths (e.g. task_struct / scx.ops_state).",
-            "items": {
-              "type": "object",
-              "required": ["struct", "fields"],
-              "properties": {
-                "struct": {"type": "string"},
-                "fields": {"type": "array", "items": {"type": "string"}}
-              }
-            }
-          },
-          "access": {"enum": ["read", "write", "rw"]},
-          "requires": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "locks": {"type": "array", "items": {"type": "string"}, "description": "Symbolic lock names: rq, task_rq, dsq, pi_lock, none"},
-              "contexts": {"type": "array", "items": {"type": "string"}, "description": "ops callbacks or SCX_KF_* masks"},
-              "predicates": {"type": "array", "items": {"type": "string"}, "description": "Guard predicates that must hold before the write, e.g. ops_cpu_valid(cpu)"},
-              "transitions": {
-                "type": "array",
-                "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2},
-                "description": "Allowed [from, to] state transitions"
-              }
-            }
-          },
-          "applies_to": {"type": "array", "items": {"type": "string"}, "description": "kfunc names, or [\"*\"]"},
-          "enforcement_expected": {"enum": ["static", "runtime", "static+runtime", "none", "unknown"]},
-          "references": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["file"],
-              "properties": {"file": {"type": "string"}, "line": {"type": "integer"}, "note": {"type": "string"}}
-            }
-          }
+      "minItems": 1,
+      "description": "Invariant entries. Ids must be unique across all catalog files (tools/validate_contracts.py checks this).",
+      "items": {"$ref": "#/$defs/invariant"}
+    }
+  },
+  "$defs": {
+    "invariant": {
+      "type": "object",
+      "required": ["id", "family", "title", "description", "category", "status", "objects", "access", "requires", "applies_to", "enforcement", "references"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^I[1-9][0-9]*(\\.[a-z][a-z0-9_]*)+$",
+          "description": "Stable id '<family>.<slug>[.<slug>...]' with lower_snake slugs, e.g. I1.dsq_insert.context. The prefix must equal 'family' (checked by tools/validate_contracts.py). findings.schema.json 'invariant' and ground_truth.csv refer to this id."
+        },
+        "family": {
+          "type": "string",
+          "pattern": "^I[1-9][0-9]*$",
+          "description": "Invariant family: I1 context & locking (A3), I2 ownership / DSQ / ops_state (A4), I3 CPU / affinity / argument validity (A5), I4 value ranges (A6). Checker plug-ins are registered per family."
+        },
+        "title": {"type": "string", "minLength": 1, "description": "One-line statement of the invariant."},
+        "description": {"type": "string", "minLength": 1, "description": "Precise prose: what must hold, why it matters, known exceptions."},
+        "category": {
+          "enum": ["context_locking", "ownership_state", "argument_validity", "value_range"],
+          "description": "Kind of invariant; normally context_locking=I1, ownership_state=I2, argument_validity=I3, value_range=I4."
+        },
+        "status": {
+          "enum": ["draft", "source_verified"],
+          "description": "source_verified = every reference was checked against the pinned kernel source (kernel_commit). It is not a claim about runtime behaviour."
+        },
+        "objects": {
+          "type": "array",
+          "description": "Shared kernel state the invariant protects. May be empty for pure calling-context invariants.",
+          "items": {"$ref": "#/$defs/object"}
+        },
+        "access": {
+          "enum": ["read", "write", "rw", "none"],
+          "description": "How the covered kfuncs access 'objects' (default for objects without their own 'access'); 'none' for pure context rules."
+        },
+        "requires": {"$ref": "#/$defs/requires"},
+        "applies_to": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^(\\*|[A-Za-z_][A-Za-z0-9_]*)$"},
+          "description": "kfunc names (as in catalog/kfuncs.csv and call graph roots) the invariant constrains, or [\"*\"] for every sched_ext kfunc."
+        },
+        "enforcement": {"$ref": "#/$defs/enforcement"},
+        "references": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/reference"},
+          "description": "Kernel source / documentation locations that define the invariant."
+        },
+        "notes": {"type": "string", "description": "Free-form remarks: open questions, version caveats, link to the write-up."}
+      }
+    },
+    "ident": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$", "description": "C identifier (lower case)."},
+    "callback": {"type": "string", "pattern": "^ops\\.[a-z_]+$", "description": "sched_ext_ops callback, e.g. ops.enqueue."},
+    "object": {
+      "type": "object",
+      "required": ["struct", "fields"],
+      "additionalProperties": false,
+      "description": "A struct and field paths; '<struct>.<field>' is exactly a callgraph.schema.json fieldref (task_struct + scx.ops_state = task_struct.scx.ops_state).",
+      "properties": {
+        "struct": {"$ref": "#/$defs/ident", "description": "C struct name without 'struct', e.g. task_struct, rq, scx_dispatch_q."},
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z_][a-z0-9_\\[\\]]*(\\.[a-z_][a-z0-9_\\[\\]]*)*$"},
+          "description": "Field paths relative to the struct, e.g. scx.ops_state, scx.dsq_list."
+        },
+        "access": {"enum": ["read", "write", "rw"], "description": "Overrides the entry-level 'access' for this object."}
+      }
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Conditions that must hold; at least one of contexts / locks / predicates / transitions.",
+      "properties": {
+        "contexts": {"$ref": "#/$defs/contexts"},
+        "locks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/lock"},
+          "description": "Lock (or lock-like) state required on callback entry or at the access site (I1, I2)."
+        },
+        "predicates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/predicate"},
+          "description": "Guard predicates that must hold before the protected access (I3, I4)."
+        },
+        "transitions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/transition"},
+          "description": "The only legal transitions of the state field in 'objects' (I2). Unlisted transitions are violations."
         }
+      }
+    },
+    "contexts": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Calling contexts from which the kfuncs may be invoked (I1). Present lists are conjunctive.",
+      "properties": {
+        "kfunc_sets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^scx_kfunc_ids_[a-z_]+$"},
+          "description": "BTF kfunc id sets the kfuncs are registered in, e.g. scx_kfunc_ids_enqueue_dispatch (KfuncGroup ENQUEUE in checker/context.py)."
+        },
+        "callbacks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/callback"},
+          "description": "sched_ext_ops callbacks allowed to call the kfuncs (from scx_kf_allow_flags[]). Omitted = not restricted per callback."
+        },
+        "program_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["BPF_PROG_TYPE_STRUCT_OPS", "BPF_PROG_TYPE_SYSCALL", "BPF_PROG_TYPE_TRACING"]},
+          "description": "BPF program types the kfunc sets are registered for (register_btf_kfunc_id_set())."
+        }
+      }
+    },
+    "lock": {
+      "type": "object",
+      "required": ["lock", "state", "where"],
+      "additionalProperties": false,
+      "properties": {
+        "lock": {
+          "$ref": "#/$defs/ident",
+          "description": "Symbolic lock, same vocabulary as callgraph events: rq, task_rq, dsq, pi_lock, scx_dump_lock; pseudo-locks irqs_disabled, preempt_disabled, rcu_read."
+        },
+        "state": {"enum": ["held", "not_held"], "description": "Required state of the lock."},
+        "where": {
+          "enum": ["callback_entry", "access_site"],
+          "description": "callback_entry = held by the core when it invokes 'callbacks' (seeds the checker's entry lockset); access_site = must hold where 'objects' are accessed / where the kfunc runs."
+        },
+        "callbacks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/callback"},
+          "description": "For where=callback_entry: callbacks this applies to (default: all of requires.contexts.callbacks)."
+        },
+        "note": {"type": "string"}
+      }
+    },
+    "predicate": {
+      "type": "object",
+      "required": ["expr"],
+      "additionalProperties": false,
+      "properties": {
+        "expr": {"type": "string", "minLength": 1, "description": "Source-level C condition that must be true, matched against callgraph guard 'cond', e.g. ops_cpu_valid(sch, cpu, where)."},
+        "checked_by": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/ident"},
+          "description": "Kernel functions that evaluate the predicate."
+        },
+        "on_failure": {
+          "enum": ["return", "error", "fallback", "continue"],
+          "description": "Expected behaviour when it fails; same enum as callgraph guard 'action'."
+        },
+        "note": {"type": "string"}
+      }
+    },
+    "transition": {
+      "type": "object",
+      "required": ["from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "from": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$", "description": "Source state constant, e.g. SCX_OPSS_QUEUED."},
+        "to": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$", "description": "Target state constant."},
+        "op": {
+          "enum": ["set", "set_release", "cmpxchg"],
+          "description": "Update primitive: plain atomic set, atomic_long_set_release(), or atomic_long_try_cmpxchg()."
+        },
+        "lock": {"$ref": "#/$defs/ident", "description": "Lock that must be held while making the transition, if any."},
+        "sites": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/ident"},
+          "description": "Kernel functions that perform it."
+        }
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "required": ["expected", "mechanisms"],
+      "additionalProperties": false,
+      "description": "How the kernel is expected to enforce the invariant: the hypothesis the checker confirms or refutes, and what A7's ground truth records.",
+      "properties": {
+        "expected": {
+          "enum": ["static", "runtime", "static+runtime", "none", "unknown"],
+          "description": "static = at BPF load / verify time; runtime = during execution; none = not enforced (potential bug). Same enum as findings.schema.json static_or_runtime."
+        },
+        "mechanisms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/mechanism"},
+          "description": "Expected mechanisms; same enum as findings.schema.json enforcement (tools/validate_contracts.py checks they stay in sync)."
+        },
+        "sites": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/reference"},
+          "description": "Where the mechanisms live (file:line)."
+        }
+      }
+    },
+    "mechanism": {
+      "enum": ["kfunc_set", "verifier", "kf_mask", "lock", "lockdep", "scx_error", "warn", "guard", "atomic", "none", "unknown"],
+      "description": "kfunc_set = membership of a BTF kfunc set registered for a program type (static); verifier = verifier-time check, incl. the set's .filter scx_kfunc_context_filter() (static); kf_mask = legacy runtime current->scx.kf_mask / scx_kf_allowed() (absent in v7.1); lock = lock taken / held; lockdep = lockdep_assert_*() (runtime, debug kernels); scx_error = scx_error() aborts the BPF scheduler; warn = WARN_ON*(); guard = condition check with early return / fallback; atomic = atomic op or cmpxchg; none = not enforced; unknown = not determined."
+    },
+    "reference": {
+      "type": "object",
+      "required": ["file"],
+      "additionalProperties": false,
+      "properties": {
+        "file": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$", "description": "Path relative to the kernel tree root, e.g. kernel/sched/ext.c."},
+        "line": {"type": "integer", "minimum": 1, "description": "First line."},
+        "end_line": {"type": "integer", "minimum": 1, "description": "Last line of a range (>= line)."},
+        "symbol": {"type": "string", "description": "Function, macro or table at that location."},
+        "note": {"type": "string"}
       }
     }
   }
