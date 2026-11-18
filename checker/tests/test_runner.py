@@ -87,6 +87,16 @@ class RunnerTests(FixtureTests):
         with self.assertRaisesRegex(ValueError, "unknown contract"):
             runner.validate("missing", {})
 
+    def test_unsupported_dependency_versions_fail_before_schema_resolution(self):
+        for package, installed in (("jsonschema", "4.10.3"), ("jsonschema", "5.0.0"),
+                                   ("PyYAML", "6.0.2"), ("PyYAML", "7.0.0")):
+            versions = {"jsonschema": "4.18.0", "PyYAML": "6.0.3", package: installed}
+            with self.subTest(package=package, installed=installed), patch("checker.runner.version", versions.__getitem__):
+                with self.assertRaisesRegex(ValueError, "requires") as error:
+                    runner.check(self.graph, self.catalog)
+                self.assertIn(installed, str(error.exception))
+                self.assertIn("checker/requirements.txt", str(error.exception))
+
     def test_invalid_registration_rejected(self):
         for invariant_id, fn in ((None, lambda g, c: []), ([], lambda g, c: []),
                                  ("", lambda g, c: []), ("I1", None)):
@@ -199,6 +209,7 @@ class CliTests(FixtureTests):
         self.assertEqual(0, completed.returncode, completed.stderr)
         output = json.loads(completed.stdout)
         self.assertEqual([], output["findings"])
+        self.assertEqual("contracts/fixtures/callgraph.example.json", output["callgraph"])
         runner.validate("findings", output)
         self.assertIn("no semantic checkers installed", completed.stderr)
         self.assertIn("no safety claim", completed.stderr)
@@ -209,7 +220,7 @@ class CliTests(FixtureTests):
         code, stdout, stderr = self.cli("--callgraph", graph, "--catalog", catalog)
         self.assertEqual(0, code, stderr)
         output = json.loads(stdout)
-        self.assertEqual(str(graph), output["callgraph"])
+        self.assertEqual("contracts/fixtures/callgraph.example.json", output["callgraph"])
         self.assertEqual(self.graph["kernel_version"], output["kernel_version"])
         runner.validate("findings", output)
 
@@ -217,7 +228,16 @@ class CliTests(FixtureTests):
         completed = subprocess.run([sys.executable, str(ROOT / "scxa"), "check"],
                                    cwd=self.temp, capture_output=True, text=True)
         self.assertEqual(0, completed.returncode, completed.stderr)
-        runner.validate("findings", json.loads(completed.stdout))
+        output = json.loads(completed.stdout)
+        runner.validate("findings", output)
+        self.assertEqual("contracts/fixtures/callgraph.example.json", output["callgraph"])
+
+    def test_external_callgraph_path_is_absolute_with_portable_separators(self):
+        path = self.temp / "callgraph.json"
+        path.write_text(json.dumps(self.graph), encoding="utf-8")
+        code, stdout, stderr = self.cli("--callgraph", path)
+        self.assertEqual(0, code, stderr)
+        self.assertEqual(path.resolve().as_posix(), json.loads(stdout)["callgraph"])
 
     def test_missing_file(self):
         for option in ("--callgraph", "--catalog"):
@@ -249,7 +269,38 @@ class CliTests(FixtureTests):
     def test_schema_mismatch(self):
         path = self.temp / "bad.json"
         path.write_text("{}", encoding="utf-8")
-        self.assert_cli_error("--callgraph", path)
+        error = self.assert_cli_error("--callgraph", path)
+        self.assertEqual("scxa check: $: 'kernel_version' is a required property\n", error)
+        self.assertNotIn("Failed validating", error)
+        self.assertNotIn("On instance", error)
+
+    def test_nested_schema_error_shows_json_path_without_schema_dump(self):
+        path = self.temp / "bad.json"
+        self.graph["roots"][0] = 42
+        path.write_text(json.dumps(self.graph), encoding="utf-8")
+        error = self.assert_cli_error("--callgraph", path)
+        self.assertIn("$.roots[0]", error)
+        self.assertIn("not of type", error)
+        self.assertLess(len(error), 200)
+
+    def test_schema_error_formatting_uses_message_and_path(self):
+        error = jsonschema.SchemaError("invalid contract type", path=["properties", "value", "type"])
+        with patch("checker.__main__.check", side_effect=error):
+            diagnostic = self.assert_cli_error()
+        self.assertEqual("scxa check: $.properties.value.type: invalid contract type\n", diagnostic)
+
+    def test_legacy_jsonschema_fails_with_an_installation_hint(self):
+        versions = {"jsonschema": "4.10.3", "PyYAML": "6.0.3"}
+        with patch("checker.runner.version", versions.__getitem__):
+            error = self.assert_cli_error()
+        self.assertIn("jsonschema>=4.18,<5", error)
+        self.assertIn("4.10.3", error)
+        self.assertIn("checker/requirements.txt", error)
+
+    def test_catalog_directory_has_an_explicit_single_file_error(self):
+        error = self.assert_cli_error("--catalog", self.temp)
+        self.assertIn("expected one JSON or YAML file", error)
+        self.assertIn("directory", error)
 
     def test_kernel_mismatch(self):
         path = self.temp / "catalog.json"
@@ -275,7 +326,9 @@ class CliTests(FixtureTests):
         path = self.temp / "findings.json"
         path.write_text("existing output", encoding="utf-8")
         register("I1", lambda g, c: [self.finding() | {"verdict": "safe"}])
-        self.assert_cli_error("-o", path)
+        error = self.assert_cli_error("-o", path)
+        self.assertIn("$.findings[0].verdict", error)
+        self.assertNotIn("Failed validating", error)
         self.assertEqual("existing output", path.read_text(encoding="utf-8"))
 
     def test_output_io_error(self):
