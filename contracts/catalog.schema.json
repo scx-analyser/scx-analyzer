@@ -10,7 +10,7 @@
     "kernel_version": {
       "type": "string",
       "minLength": 1,
-      "description": "Kernel the entries were derived from. Must equal the kernel_version of the call graph and findings it is used with (the checker rejects mismatches)."
+      "description": "Kernel tag the entries were derived from. Must equal the kernel_version of the call graph and findings it is used with (the checker rejects mismatches). Real catalog files carry /KERNEL_VERSION once it is pinned; the illustrative fixture carries the call-graph fixture's value (tools/validate_contracts.py checks both)."
     },
     "kernel_commit": {
       "type": "string",
@@ -51,8 +51,7 @@
           "minItems": 1,
           "items": {"$ref": "#/$defs/rule"},
           "description": "Concrete rules of the family (per kfunc set / kfunc group)."
-        },
-        "notes": {"type": "string", "description": "Free-form remarks on the family as a whole."}
+        }
       }
     },
     "rule": {
@@ -90,7 +89,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {"type": "string", "pattern": "^(\\*|[A-Za-z_][A-Za-z0-9_]*)$"},
-          "description": "kfunc names (as in catalog/kfuncs.csv and call graph roots) the invariant constrains, or [\"*\"] for every sched_ext kfunc."
+          "description": "kfunc names (as in catalog/kfuncs.csv and call graph roots) the invariant constrains, or exactly [\"*\"] for every sched_ext kfunc ('*' is not mixed with names; checked by tools/validate_contracts.py)."
         },
         "enforcement": {"$ref": "#/$defs/enforcement"},
         "references": {
@@ -198,7 +197,7 @@
           "items": {"$ref": "#/$defs/callback"},
           "description": "For where=callback_entry: callbacks this applies to (default: all of requires.contexts.callbacks)."
         },
-        "note": {"type": "string"}
+        "note": {"type": "string", "description": "Evidence or caveat for this lock fact, e.g. the call site that holds it."}
       }
     },
     "predicate": {
@@ -217,7 +216,7 @@
           "enum": ["return", "error", "fallback", "continue"],
           "description": "Expected behaviour when it fails; same enum as callgraph guard 'action'."
         },
-        "note": {"type": "string"}
+        "note": {"type": "string", "description": "Where or when the predicate applies, or what the failure path does."}
       }
     },
     "transition": {
@@ -248,7 +247,7 @@
       "properties": {
         "expected": {
           "enum": ["static", "runtime", "static+runtime", "none", "unknown"],
-          "description": "static = at BPF load / verify time; runtime = during execution; none = not enforced (potential bug). Same enum as findings.schema.json static_or_runtime."
+          "description": "Checks active on a production kernel. static = at BPF load / verify time (mechanisms kfunc_set, verifier); runtime = during execution on every kernel (lock, scx_error, warn, guard, atomic, kf_mask); static+runtime = both; none = neither (potential bug); unknown = not determined. lockdep never counts toward runtime because it only runs with CONFIG_LOCKDEP. Same enum as findings.schema.json static_or_runtime; tools/validate_contracts.py checks it against 'mechanisms'."
         },
         "mechanisms": {
           "type": "array",
@@ -266,7 +265,7 @@
     },
     "mechanism": {
       "enum": ["kfunc_set", "verifier", "kf_mask", "lock", "lockdep", "scx_error", "warn", "guard", "atomic", "none", "unknown"],
-      "description": "kfunc_set = membership of a BTF kfunc set registered for a program type (static); verifier = verifier-time check, incl. the set's .filter scx_kfunc_context_filter() (static); kf_mask = legacy runtime current->scx.kf_mask / scx_kf_allowed() (absent in v7.1); lock = lock taken / held; lockdep = lockdep_assert_*() (runtime, debug kernels); scx_error = scx_error() aborts the BPF scheduler; warn = WARN_ON*(); guard = condition check with early return / fallback; atomic = atomic op or cmpxchg; none = not enforced; unknown = not determined."
+      "description": "kfunc_set = membership of a BTF kfunc set registered for a program type (static); verifier = verifier-time check, incl. the set's .filter scx_kfunc_context_filter() (static); kf_mask = legacy runtime current->scx.kf_mask / scx_kf_allowed() (absent in v7.1); lock = lock taken / held; lockdep = lockdep_assert_*(), active only with CONFIG_LOCKDEP and therefore not counted toward enforcement.expected runtime; scx_error = scx_error() aborts the BPF scheduler; warn = WARN_ON*(); guard = condition check with early return / fallback; atomic = atomic op or cmpxchg; none = not enforced (only with expected none); unknown = not determined."
     },
     "reference": {
       "type": "object",
@@ -277,8 +276,9 @@
         "line": {"type": "integer", "minimum": 1, "description": "First line."},
         "end_line": {"type": "integer", "minimum": 1, "description": "Last line of a range (>= line)."},
         "symbol": {"type": "string", "description": "Function, macro or table at that location."},
-        "note": {"type": "string"}
-      }
+        "note": {"type": "string", "description": "What the cited lines show."}
+      },
+      "dependentRequired": {"end_line": ["line"]}
     }
   }
 }
