@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "scx-analyzer/catalog.schema.json",
   "title": "Invariant catalog (owned by Epic A, consumed by Epics C and D)",
-  "description": "Invariants that sched_ext kfuncs must respect on the pinned kernel. Each entry states which shared state is touched, which context / lock / predicate / state-transition discipline protects it, which kfuncs it applies to and how the kernel is expected to enforce it, with file:line references. Epic C turns entries into checks over the call graph; Epic D joins findings and catalog/ground_truth.csv on (kfunc, invariant id).",
+  "description": "Invariants that sched_ext kfuncs must respect on the pinned kernel. Each top-level entry is one invariant family (I1, I2, ...): the id checker plug-ins register under and findings report. Its 'rules' state, per kfunc set or kfunc group, which shared state is touched, which context / lock / predicate / state-transition discipline protects it, which kfuncs it applies to and how the kernel is expected to enforce it, with file:line references. Epic C turns rules into checks over the call graph; Epic D joins findings and catalog/ground_truth.csv on (kfunc, invariant family id), with the rule id as the finer key.",
   "type": "object",
   "required": ["kernel_version", "invariants"],
   "additionalProperties": false,
@@ -24,25 +24,46 @@
     "invariants": {
       "type": "array",
       "minItems": 1,
-      "description": "Invariant entries. Ids must be unique across all catalog files (tools/validate_contracts.py checks this).",
+      "description": "Invariant families, one entry per family id. Family ids must be unique within a file and across all catalog files; rule ids likewise (tools/validate_contracts.py checks this; the checker runner rejects duplicate family ids).",
       "items": {"$ref": "#/$defs/invariant"}
     }
   },
   "$defs": {
     "invariant": {
       "type": "object",
-      "required": ["id", "family", "title", "description", "category", "status", "objects", "access", "requires", "applies_to", "enforcement", "references"],
+      "required": ["id", "title", "description", "category", "rules"],
+      "additionalProperties": false,
+      "description": "One invariant family. 'id' is what checker.checkers.register() takes and what findings.schema.json 'invariant' carries.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^I[1-9][0-9]*$",
+          "description": "Family id: I1 context & locking (A3), I2 ownership / DSQ / ops_state (A4), I3 CPU / affinity / argument validity (A5), I4 value ranges (A6). Checker plug-ins are registered per family id."
+        },
+        "title": {"type": "string", "minLength": 1, "description": "One-line statement of the family."},
+        "description": {"type": "string", "minLength": 1, "description": "Scope of the family and conventions shared by its rules."},
+        "category": {
+          "enum": ["context_locking", "ownership_state", "argument_validity", "value_range"],
+          "description": "Kind of invariant; normally context_locking=I1, ownership_state=I2, argument_validity=I3, value_range=I4. Every rule of the family has the same category."
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/rule"},
+          "description": "Concrete rules of the family (per kfunc set / kfunc group)."
+        },
+        "notes": {"type": "string", "description": "Free-form remarks on the family as a whole."}
+      }
+    },
+    "rule": {
+      "type": "object",
+      "required": ["id", "title", "description", "category", "status", "objects", "access", "requires", "applies_to", "enforcement", "references"],
       "additionalProperties": false,
       "properties": {
         "id": {
           "type": "string",
           "pattern": "^I[1-9][0-9]*(\\.[a-z][a-z0-9_]*)+$",
-          "description": "Stable id '<family>.<slug>[.<slug>...]' with lower_snake slugs, e.g. I1.dsq_insert.context. The prefix must equal 'family' (checked by tools/validate_contracts.py). findings.schema.json 'invariant' and ground_truth.csv refer to this id."
-        },
-        "family": {
-          "type": "string",
-          "pattern": "^I[1-9][0-9]*$",
-          "description": "Invariant family: I1 context & locking (A3), I2 ownership / DSQ / ops_state (A4), I3 CPU / affinity / argument validity (A5), I4 value ranges (A6). Checker plug-ins are registered per family."
+          "description": "Stable id '<family>.<slug>[.<slug>...]' with lower_snake slugs, e.g. I1.dsq_insert.context. The prefix must equal the enclosing family id (checked by tools/validate_contracts.py). ground_truth.csv and finding evidence may refer to it."
         },
         "title": {"type": "string", "minLength": 1, "description": "One-line statement of the invariant."},
         "description": {"type": "string", "minLength": 1, "description": "Precise prose: what must hold, why it matters, known exceptions."},
@@ -145,7 +166,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/callback"},
-          "description": "sched_ext_ops callbacks allowed to call the kfuncs (from scx_kf_allow_flags[]). Omitted = not restricted per callback."
+          "description": "sched_ext_ops callbacks allowed to call the kfuncs (from scx_kf_allow_flags[]), written ops.<name>; checker/context.py get_context() accepts this form (it strips 'ops.'). Omitted = not restricted per callback."
         },
         "program_types": {
           "type": "array",
@@ -163,7 +184,7 @@
       "properties": {
         "lock": {
           "$ref": "#/$defs/ident",
-          "description": "Symbolic lock, same vocabulary as callgraph events: rq, task_rq, dsq, pi_lock, scx_dump_lock; pseudo-locks irqs_disabled, preempt_disabled, rcu_read."
+          "description": "Symbolic lock, same vocabulary as callgraph events and checker/context.py entry-lock facts: rq (the rq the callback was invoked with, C2's 'callback's rq'; for task ops that is task_rq(p)), task_rq (rq of a task argument where it is not the callback's rq), dsq, pi_lock, scx_dump_lock; pseudo-locks irqs_disabled, preempt_disabled, rcu_read."
         },
         "state": {"enum": ["held", "not_held"], "description": "Required state of the lock."},
         "where": {

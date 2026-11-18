@@ -4,8 +4,10 @@
 Run locally: python3 tools/validate_contracts.py
 
 Besides JSON-Schema validation, catalog files get checks a schema cannot express:
-id prefix == family, end_line >= line, ids unique across catalog/invariants/*.yaml,
-and the catalog's enforcement-mechanism enum must equal the findings schema's.
+family ids and rule ids unique (within a file and across catalog/invariants/*.yaml),
+rule id prefix == enclosing family id, rule category == family category,
+end_line >= line, and the catalog's enforcement-mechanism enum must equal the
+findings schema's.
 """
 import json
 import sys
@@ -31,25 +33,42 @@ def load(p: Path):
     return yaml.safe_load(p.read_text()) if p.suffix in (".yaml", ".yml") else json.loads(p.read_text())
 
 
-def iter_refs(inv: dict):
-    yield from inv.get("references", [])
-    yield from inv.get("enforcement", {}).get("sites", [])
+def iter_refs(rule: dict):
+    yield from rule.get("references", [])
+    yield from rule.get("enforcement", {}).get("sites", [])
+
+
+def catalog_ids(doc: dict) -> list[str]:
+    """Family ids and rule ids of a schema-valid catalog (one shared namespace)."""
+    ids = []
+    for fam in doc["invariants"]:
+        ids.append(fam["id"])
+        ids.extend(rule["id"] for rule in fam["rules"])
+    return ids
 
 
 def catalog_semantic_errors(doc: dict) -> list[str]:
     errs, seen = [], set()
-    for i, inv in enumerate(doc.get("invariants", [])):
-        iid = inv.get("id", "")
-        if iid in seen:
-            errs.append(f"invariants/{i}/id: duplicate id {iid!r}")
-        seen.add(iid)
-        if iid.split(".", 1)[0] != inv.get("family"):
-            errs.append(f"invariants/{i}/id: {iid!r} does not start with family {inv.get('family')!r}")
-        for ref in iter_refs(inv):
-            if "end_line" in ref and ref["end_line"] < ref.get("line", 0):
-                errs.append(f"invariants/{i}: reference {ref.get('file')}:{ref.get('line')} has end_line < line")
-            if "end_line" in ref and "line" not in ref:
-                errs.append(f"invariants/{i}: reference {ref.get('file')} has end_line without line")
+    for i, fam in enumerate(doc.get("invariants", [])):
+        fid = fam.get("id", "")
+        if fid in seen:
+            errs.append(f"invariants/{i}/id: duplicate family id {fid!r}")
+        seen.add(fid)
+        for j, rule in enumerate(fam.get("rules", [])):
+            loc = f"invariants/{i}/rules/{j}"
+            rid = rule.get("id", "")
+            if rid in seen:
+                errs.append(f"{loc}/id: duplicate rule id {rid!r}")
+            seen.add(rid)
+            if rid.split(".", 1)[0] != fid:
+                errs.append(f"{loc}/id: {rid!r} does not start with family {fid!r}")
+            if rule.get("category") != fam.get("category"):
+                errs.append(f"{loc}/category: {rule.get('category')!r} != family category {fam.get('category')!r}")
+            for ref in iter_refs(rule):
+                if "end_line" in ref and ref["end_line"] < ref.get("line", 0):
+                    errs.append(f"{loc}: reference {ref.get('file')}:{ref.get('line')} has end_line < line")
+                if "end_line" in ref and "line" not in ref:
+                    errs.append(f"{loc}: reference {ref.get('file')} has end_line without line")
     return errs
 
 
@@ -78,8 +97,7 @@ def main() -> int:
                 if kind == "catalog" and not errs:
                     errs += catalog_semantic_errors(doc)
                     if rel.startswith(CATALOG_NAMESPACE):
-                        for inv in doc["invariants"]:
-                            iid = inv["id"]
+                        for iid in catalog_ids(doc):
                             if iid in namespace and namespace[iid] != p:
                                 other = namespace[iid].relative_to(ROOT).as_posix()
                                 errs.append(f"id {iid!r} also defined in {other}")
