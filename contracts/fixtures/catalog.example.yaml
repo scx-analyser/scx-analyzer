@@ -52,7 +52,7 @@ invariants:
         - {file: kernel/sched/ext.c, line: 8331, end_line: 8336, symbol: scx_kfunc_ids_enqueue_dispatch, note: "BTF set membership"}
         - {file: kernel/sched/ext.c, line: 9936, end_line: 9937, symbol: scx_init, note: "registered for BPF_PROG_TYPE_STRUCT_OPS only"}
         - {file: kernel/sched/ext.c, line: 9860, end_line: 9918, symbol: scx_kfunc_context_filter, note: "verifier-time per-op filter, -EACCES otherwise"}
-        - {file: kernel/sched/ext.c, line: 8101, symbol: scx_dsq_insert_preamble, note: "lockdep_assert_irqs_disabled()"}
+        - {file: kernel/sched/ext.c, line: 8102, symbol: scx_dsq_insert_preamble, note: "lockdep_assert_irqs_disabled()"}
     references:
       - {file: kernel/sched/ext.c, line: 9828, end_line: 9850, symbol: scx_kf_allow_flags, note: "select_cpu/enqueue/dispatch grant SCX_KF_ALLOW_ENQUEUE"}
       - {file: kernel/sched/ext.c, line: 8162, end_line: 8163, symbol: scx_bpf_dsq_insert, note: "kernel-doc: can be called from ops.enqueue(), ops.select_cpu(), ops.dispatch()"}
