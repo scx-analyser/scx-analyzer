@@ -1,97 +1,207 @@
 # C3: conservative interprocedural locksets
 
-`checker.lockset` tracks ownership of specific lock objects through Epic B's ordered events and assesses explicitly protected accesses. It is a static model, not a kernel execution, verifier result, or completed I1 checker. No semantic plugin is registered. C1's API/CLI, C2, the shared contracts/fixtures, and `KERNEL_VERSION` are unchanged.
+`checker.lockset` propagates specific lock-object ownership through ordered
+events and evaluates explicit field policies. Results describe an abstract
+model, not a kernel execution or an implemented graded invariant. No semantic
+checker is automatically registered. C1, C2, shared contracts/fixtures and
+`KERNEL_VERSION` are unchanged.
 
-## Domain, policies, and identities
+## Domain and policy
 
-`LockState` is reused from C2: `KNOWN_HELD`, `KNOWN_NOT_HELD`, `UNKNOWN`. No fact means unknown, not absent. `Lockset` is immutable, copies caller mappings, and returns new states on updates. Compare states and assessments explicitly; their boolean conversion raises `TypeError`.
+C3 reuses C2's KNOWN_HELD / KNOWN_NOT_HELD / UNKNOWN domain. Missing facts mean
+UNKNOWN. Locksets are immutable; states and assessments reject boolean conversion.
 
-`checker.lock_policy` defines `LockIdentity`, `ProtectionRule`, and `ProtectionPolicy`. Each rule names an exact function, contract field reference, access kind (`WRITE` or `ATOMIC`), and required lock object. Rules for the same function/field/access kind are conjunctive: every required lock must be held before any record for that access is labeled protected. Records retain individual lock observations; a known-absent required lock is an unprotected witness, while a held lock with another unsatisfied requirement cannot certify protection. Atomic rules do not constrain normal writes, or vice versa. These are caller-supplied internal policies; C3 does not translate the illustrative catalog's `requires.locks` into blanket field requirements.
+A `ProtectionRule(function, field, lock, access)` is an explicit obligation for
+one function/field/access kind and one object identity. Rules applying to the
+same access are conjunctive: every required lock must be held before any record
+for that access is PROTECTED. A definitely absent required lock is an
+UNPROTECTED witness **in the model**, not a demonstrated kernel violation.
+WRITE and ATOMIC policies are separate. With no matching policy, C3 emits
+`no_write_policy` / `no_atomic_policy`; it infers no protecting lock.
 
-`LockIdentity("cpu0.rq.lock")`, `LockIdentity("cpu1.rq.lock")`, `LockIdentity("p0.pi_lock")`, and `LockIdentity("dsq0.lock")` are distinct. Every event lock token needs an explicit per-function binding to an identity. Identical token spellings in different functions do not imply the same object; different tokens alias only if the caller explicitly binds them to the same object. Field rules also apply only to the specified function: a structural field name does not identify one runtime object across all functions.
+`LockIdentity("cpu0.rq.lock")`, `LockIdentity("cpu1.rq.lock")`, task pi locks and
+DSQ locks remain distinct. Every event token needs an explicit per-function
+binding; spelling alone never aliases objects. Bindings and field obligations
+attest to stable objects throughout the analysis invocation. The current schema
+has no call arguments, field-object IDs or points-to facts: a generic helper
+used with different objects must be specialized with verified bindings, analyzed
+separately, or left UNKNOWN. One structural field name does not identify one
+runtime object across all sites.
 
-Bindings attest to stable objects for the entire analysis invocation. There are no call arguments or points-to facts in the current schema, so C3 cannot resolve a generic callee's parameter to different objects at different call sites. Use separate invocations/bindings for such contexts, or leave bindings unresolved. Missing bindings invalidate ownership facts because an unidentified lock operation could affect any tracked object. No real Linux protection policy is installed; the demo's `rq.nr_running` policy is synthetic.
+No Linux field-protection policy is installed. The demo's
+`rq.nr_running -> synthetic.rq0.lock` obligation is synthetic.
+[Catalog integration design](README-c3-catalog.md) explains why callback entry
+locks and the current A3 hypotheses cannot simply become access-site policies.
 
-## Input assumptions and transfer functions
+## Transfer functions and control flow
 
-`Provenance(complete_events=True, linear_events=True)` is an explicit caller attestation that event bodies are exhaustive and primitive operations are successful and unconditional, with stable bindings and no omitted branches. It is not inferred from schema validity or the generator name, and is not a certificate of source correctness. Defaults are conservative: missing attestations or `illustrative: true` make assessments unknown. Synthetic examples use their own source-version string and set `synthetic=True`.
-
-For an attested linear model with no unresolved conditions:
-
-| Event | Transfer |
+| Event | Effect |
 |---|---|
-| `lock` | Bound lock becomes held after a successful unconditional acquisition. |
-| `unlock` | Bound lock becomes not held after a successful unconditional release. |
-| `assert_held`, `assert_not_held` | Check a precondition; never acquire/release a lock. Record met, unmet, or unproven. |
-| `write` | Assess matching explicit write-policy rules against the current ownership state. |
-| `atomic` | Assess only explicit atomic-policy rules; never borrow a normal-write requirement or acquire a lock. Missing atomic policies are reported as coverage diagnostics. |
-| `call` | Visit a confirmed direct callee with the current state, then use its exit state in the caller. |
-| `guard`, `error`, `warn` | Invalidate definite ownership/reachability; no CFG proves a harmless continuation. |
+| Unqualified, unconditional `lock` | The explicitly bound lock becomes KNOWN_HELD after a successful primitive acquisition in the trusted model. |
+| Unqualified, unconditional `unlock` | That lock becomes KNOWN_NOT_HELD after release. |
+| `assert_held` / `assert_not_held` | Record MET, UNMET or UNPROVEN; never acquire/release a lock. An unmet/unproven precondition invalidates certainty. |
+| `write` / `atomic` | Evaluate only explicit policies for that access kind. |
+| Confirmed direct `call` | Analyze with the caller's current state; propagate the conservative callee exit. |
+| Guard/error/warn, conditional or unsupported lock operation | Control/effect uncertainty is sticky; later acquisitions do not recover proof of reachability. |
+| Missing/indirect/opaque call, recursion, depth or work limit | UNKNOWN effects with an explicit condition and the actual cut path. |
 
-Conditional `cond`/`action` qualifiers, lock-operation `op` qualifiers (including trylocks), malformed semantic events, and repeated acquisition/release of an already held/absent simple lock are unsupported and cause uncertainty. An unknown entry state is not an assertion that the lock is absent: a successful release can establish absence even when initial ownership was unspecified. No recursive-lock counting, lock modes, IRQ state, RCU analysis, or atomic memory-order reasoning is implemented.
+Only ordered `events` determines sequence. Adjacency supplies coverage checks
+and direct/indirect classification, never execution order. Distinct source
+call sites need enough compatible ordered calls; one unlocated call cannot cover
+two different lines. Same-line sites remain ambiguous without IDs/completeness.
 
-An unmet or unproven assertion records its precondition status and makes the continuation unknown. This prevents a failed assertion from being mistaken for acquisition or for a proven reachable counterexample. Unknown control flow/effects are deliberately sticky for the rest of that root's continuation, including its callers; a later apparent acquisition does not restore certainty. Earlier accesses retain their point-in-time model assessments, which never establish whole-function safety.
+Unsequenced callees may precede any event and invalidate certainty from function
+entry. Writes in metadata without ordered accesses produce unordered UNKNOWN
+candidates (`event_index=None`, `access=None`). Missing accesses from both places
+cannot be detected. There is no CFG, path-sensitive join or reachability proof.
 
-## Calls, coverage, and bounds
+## Scoped locks and function exits
 
-Only `events` supplies execution order. The unordered `callees` list supplies call-kind classification and coverage checks. A call event needs compatible, unambiguously direct metadata; missing/indirect/ambiguous metadata cannot be resolved merely because a target node exists. Source lines must agree when present on both records. Distinct line-specific call sites must have enough compatible ordered call events: one event without a line cannot cover two different source lines. Duplicate metadata for the same target/line does not invent an additional call. Calls on the same source line cannot be distinguished reliably without call-site IDs; completeness remains a caller assumption.
+The provisional source reference is upstream v7.1 commit
+`8cd9520d35a6c38db6567e97dd93b1f11f185dc6`; this does **not** choose the course kernel.
 
-Missing definitions, `external`/`boundary` nodes, missing event bodies, recursion/cycles, and depth exhaustion invalidate all lock facts, including known-absent facts: an opaque function may acquire or release locks. An explicitly empty internal event body is pure only under the completeness attestation. Calls are analyzed afresh with each entry state; there is no universal function-state cache. Roots are independent. Default maximum call depth is 32 (root depth 0), configurable from 0 to 128 to keep Python traversal bounded. There is no fixed-point recursion analysis or bound on total acyclic call visits.
+Linux cleanup objects have destructors at lexical scope exit.
+[`CLASS`, cleanup.h:301-306](https://github.com/torvalds/linux/blob/8cd9520d35a6c38db6567e97dd93b1f11f185dc6/include/linux/cleanup.h#L301-L306)
+uses a cleanup attribute;
+[`guard` and `scoped_guard`, 399-450](https://github.com/torvalds/linux/blob/8cd9520d35a6c38db6567e97dd93b1f11f185dc6/include/linux/cleanup.h#L399-L450)
+create those objects, with scoped_guard's lifetime confined to its compound
+statement. Raw spin guards pair acquisition/release:
+[spinlock.h:535-537 and 571-574](https://github.com/torvalds/linux/blob/8cd9520d35a6c38db6567e97dd93b1f11f185dc6/include/linux/spinlock.h#L535-L574).
+See actual sched_ext uses at
+[ext.c:1243-1269](https://github.com/torvalds/linux/blob/8cd9520d35a6c38db6567e97dd93b1f11f185dc6/kernel/sched/ext.c#L1243-L1269),
+[4111](https://github.com/torvalds/linux/blob/8cd9520d35a6c38db6567e97dd93b1f11f185dc6/kernel/sched/ext.c#L4111),
+[4237](https://github.com/torvalds/linux/blob/8cd9520d35a6c38db6567e97dd93b1f11f185dc6/kernel/sched/ext.c#L4237), and
+[4621](https://github.com/torvalds/linux/blob/8cd9520d35a6c38db6567e97dd93b1f11f185dc6/kernel/sched/ext.c#L4621).
 
-A callee in adjacency without an ordered call could occur anywhere in the function, so it makes the entire function uncertain from entry. The same applies to fields in `node.writes` without matching ordered access events. Such metadata produces explicitly unordered/unknown access candidates (`event_index=None`, `access=None`) where a policy matches; C3 never invents their position or follows adjacency as an execution sequence. Missing protected writes in both events and metadata cannot be detected: completeness remains an external assumption. There is no CFG, path-sensitive branch merge, alias analysis, or reachability proof.
+A callee's apparent acquisition without a release is therefore **not** a held
+exit guarantee. C3 tracks acquisitions during each invocation. If an acquired
+lock is still apparently held on return, its exit state becomes UNKNOWN and
+`unverified_lock_escape` records the reason. This also catches a lock held on
+entry, released and then reacquired: comparing only entry/exit states would miss
+that case. Assertions do not certify lifetime or handoff.
 
-## C2 integration and provenance
+An explicit release still propagates KNOWN_NOT_HELD. A caller-held lock untouched
+by the callee remains held. Scope uncertainty affects only the acquired identities;
+it does not suppress a later explicit unlock of another lock. Root exit ownership
+is treated the same way. Earlier protected accesses inside a trusted linear
+primitive sequence remain model assessments; they do not certify a held exit.
 
-`analyze(..., callbacks={root: "dispatch"}, provenance=Provenance(source_commit=...))` requests an explicit C2 context. The callgraph version must exactly match C2's provisional `v7.1`, and the supplied commit must match C2's exact source commit. Mismatches or missing commit provenance raise `SourceVersionMismatch`. The existing TBD fixture therefore cannot receive v7.1 entry facts. An unsupported callback remains unknown.
+No lock-handoff annotation is accepted in this revision. Such an annotation
+would need reviewed object, source, acquisition and all-exit evidence. Tagged
+guard/scoped_guard operations remain unsupported/UNKNOWN. Untagged inner-scope
+cleanup omitted by extraction is still a limitation: complete_events must not
+be asserted for a body with hidden releases or branches. C3 cannot reconstruct
+inner lexical scope from this schema.
 
-C2's source-backed lock facts are treated as **entry requirements**, not observations that an execution acquired a lock. They never populate the held set from `lockdep_assert_*` evidence. A requirement is met only by an explicitly supplied `entry_states[root]` for the same bound object; otherwise it is unproven/unmet. C2 evidence is retained in the precondition record. Unresolved C2 lock symbols are not aliased to a policy lock by spelling. Callback identity, object bindings, and any intervening path from callback entry to a kfunc root remain the caller's responsibility; C2 callback facts alone do not prove kfunc-entry ownership.
+## Invocation summaries and global work budget
 
-## Results and findings
+`AnalysisResult.summaries` records each analyzed invocation's path, entry/exit
+locksets, successful acquisition/release events, encountered held/not-held
+assertions (with sites/status), and uncertainty. Acquired does **not** mean held
+on exit. Assertions are body-site requirements, not inferred universal entry
+requirements. The same function reached with different states has separate
+summaries. These are not memoized universal effects.
 
-`AnalysisResult` contains ordered access assessments, precondition assessments, explicit conditions/coverage diagnostics, and per-root exit states. Each access has an `AnalysisSite` (root, call path, function, available file/event line, event index), field/access kind, required identity, observed state, assessment, explanation, and unresolved conditions affecting that point. A missing event line stays absent rather than using a function declaration line as a write location. Serialization is deterministic, including across hash seeds and adjacency-list order.
+`analyze(..., max_work=10000)` sets one deterministic budget shared by **all**
+roots and callees. A unit charges function entry, ordered-event processing or
+metadata inspection/comparison. Metadata scans are charged too; the budget
+cannot be bypassed by repeated call-site coverage checks. Static policy lookups
+are indexed once. max_work accepts integers 1 through 1,000,000; max_depth remains
+0 through 128, with root depth zero.
 
-For a complete trusted synthetic path, a single-lock policy maps held to `protected`, absent to `unprotected`, and unknown to `unknown`. Multiple-lock policies additionally require every applicable lock for a protected assessment. These terms describe only that specific model access:
+When the budget is exceeded, expansion stops and exit ownership becomes UNKNOWN.
+The `work_budget` condition retains the real cut path. Known remaining local
+access candidates are reported UNKNOWN without traversing skipped callees.
+Skipped deeper accesses are not assigned invented paths; the unresolved gap is
+reported explicitly by the output adapter even when no access was observed.
+Evidence already produced for visited prefixes is retained.
 
-- `protected`: the policy's lock requirements hold under the specified abstract model and its input assumptions.
-- Potentially unprotected: missing ownership may merit investigation, but is reported as `unknown`, not as proven absence or a violation.
-- `unprotected`: a specific required lock is definitely absent under the model assumptions. This is not automatically a concrete reachable kernel counterexample.
-- `unknown`: ownership, ordering, coverage, or another required lock cannot be established; explanations and conditions identify the cause. Potential risk is descriptive, not a fourth categorical verdict.
+`AnalysisResult.work` reports limit, consumed units, visits, events, metadata
+and exhaustion. This bounds recursive expansion, including doubling/diamond
+graphs; it is not a wall-clock or total-memory quota. Input/schema validation,
+policy indexing and local candidate reporting after a cut still cost input work.
+Very large inputs, large locksets, policy conjunctions and output volume retain
+their own costs. No exponential complete-path enumeration is promised after
+exhaustion.
 
-`to_findings(result, invariant="I1")` provides an explicit schema-validated adapter for access records. It preserves model assessments in evidence but always emits `verdict: unknown`, `enforcement: [unknown]`, and `static_or_runtime: unknown`. It cannot certify kernel safety, source completeness, policy validity, or enforcement from this model. Preconditions and coverage diagnostics remain in the richer `AnalysisResult`; an empty findings list does not establish analysis coverage. The adapter is not registered automatically and does not infer invariant applicability from the illustrative catalog.
+## C2 integration
 
-## Example and validation
+Pass an explicit callback, exact source version/commit, configuration and object
+bindings. C2 facts are source-backed **entry requirements**; they never seed
+observed ownership. Explicit model entry states must satisfy them.
 
 ```python
-from checker.lock_policy import LockIdentity, ProtectionPolicy, ProtectionRule
-from checker.lockset import Provenance, analyze
+from checker.context import LockIdentity as C2Identity, SOURCE_COMMIT
+from checker.lock_policy import LockIdentity
+from checker.lockset import Lockset, LockState, Provenance, analyze
 
-rq0 = LockIdentity("synthetic.rq0.lock")
-policy = ProtectionPolicy((ProtectionRule("root", "rq.nr_running", rq0),))
-# graph is a schema-valid synthetic graph with a complete ordered event body.
-result = analyze(graph, policy, bindings={"root": {"rq.lock": rq0}},
-                 provenance=Provenance(complete_events=True, linear_events=True, synthetic=True))
+rq0 = LockIdentity("cpu0.rq.lock")
+result = analyze(
+    graph, policy,
+    callbacks={"root": "dispatch"},
+    context_bindings={"root": {C2Identity("rq", "dispatch.cpu:cpu"): rq0}},
+    entry_states={"root": Lockset.from_mapping({rq0: LockState.KNOWN_HELD})},
+    provenance=Provenance(
+        source_commit=SOURCE_COMMIT, complete_events=True, linear_events=True,
+        enabled_configs=("CONFIG_EXT_GROUP_SCHED",),
+    ),
+)
 ```
 
+The example assumes externally supplied graph/policy and independently justified
+entry-state/binding attestations. It does not establish them from source facts.
+
+Existing `bindings` remains the per-function **event-token** map. A bare `rq`
+token cannot identify which callback task/CPU owns that lock. `context_bindings`
+maps C2's complete typed identities to C3's explicitly identified objects. Old
+name-only context mappings now remain UNKNOWN; this intentional tightening
+prevents a wrong-rq precondition from passing.
+
+Version/commit mismatches and missing commit provenance raise SourceVersionMismatch.
+Cgroup callbacks need `Provenance.enabled_configs`; unresolved configuration
+produces `unknown_callback_configuration`. C2's 37 callbacks are available,
+but source-backed requirements with READ ownership remain
+`unsupported_entry_lock_mode`: C3 currently models exclusive ownership and must
+not silently turn shared ownership into exclusive field protection. init_task's
+rq remains UNKNOWN; no generic alias/absence is injected. The normal TBD fixture
+cannot receive v7.1 facts.
+
+## Output and commands
+
+`AccessAssessment` records root/path, function, file/line/index, field, access kind,
+required identity, observed state, explanation and conditions.
+`to_findings(..., invariant="I1")` is an explicit UNKNOWN-only adapter. It reports
+unsupported/incomplete gaps not already covered by access evidence, including
+missing callees and missing policies, so a cut does not become a checked-empty
+result. It invents neither enforcement nor kernel counterexamples and installs
+no plugin.
+
 ```text
-python -m checker.lockset_demo
-python -m checker.lockset_demo --json
 python -m unittest discover -s checker/tests -v
 python tools/validate_contracts.py
 python -m checker check
 python -m checker.context --source-version v7.1
+python -m checker.lockset_demo
+python -m checker.lockset_demo --json
+git diff --check
 ```
 
-Observed demo output:
+The synthetic demo produces protected, unprotected and unknown accesses.
+Unit tests exercise scoped-return regressions, explicit release propagation,
+deep and diamond graphs, global budgets, path evidence, contextual summaries,
+C2 identity/mode/configuration boundaries and unknown output. Host unit tests
+prove no actual kernel safety.
 
-```text
-SYNTHETIC MODEL ONLY: no kernel safety verdicts
-line 2: rq.nr_running, synthetic.rq0.lock: known_held -> protected
-line 4: rq.nr_running, synthetic.rq0.lock: known_not_held -> unprotected
-line 6: rq.nr_running, synthetic.rq0.lock: unknown -> unknown
-```
+## Remaining integration boundary
 
-The demo graph validates against the real callgraph schema. It is not the shared illustrative graph or a Linux trace. Unit tests exercise the synthetic abstract semantics, uncertainty, calls, identity separation, provenance, and adapter compatibility; they do not run a kernel or prove actual scheduler safety.
+A must verify the field-specific obligation, mode and object relationship.
+B must supply ordered complete events, scope cleanup/return information,
+call/argument/field-object bindings and source/config provenance. The current
+catalog/callgraph contracts do not carry all of that evidence. Cross-epic review
+is required before changing them. Callback permissions alone do not satisfy
+the TA's three shared scheduler-state modification invariants.
 
-## Coordination before semantic I1 activation
-
-Epic A must verify function/field-to-specific-lock requirements, atomic-access distinctions, invariant applicability, and source evidence against the team's agreed kernel. Epic B must establish event completeness, unconditional/success semantics, object and argument bindings, direct/indirect call-site correspondence, CFG/return information, and source-commit provenance. The present schema cannot carry all those facts, so any future contract changes require cross-epic review. Once that evidence exists, integrate a reviewed policy and richer entry/path facts before deciding which aggregated I1 findings can justify semantic verdicts. C4 guard analysis, I2 state transitions, verifier changes, VM execution, and runtime BPF validation remain outside this change.
+Read [the catalog design](README-c3-catalog.md) for the current A2/A3 rule audit,
+a fail-closed translation proposal and the remaining #34 acceptance blockers.
+C4, verifier changes, LLVM extraction, VM execution and runtime tests are outside
+this revision.

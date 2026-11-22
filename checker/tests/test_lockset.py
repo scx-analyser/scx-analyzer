@@ -14,7 +14,8 @@ import jsonschema
 
 from checker import runner
 from checker.checkers import _REGISTRY, registered
-from checker.context import SOURCE_COMMIT, SOURCE_VERSION, LockState, SourceVersionMismatch
+from checker.context import (SOURCE_COMMIT, SOURCE_VERSION, LockIdentity as ContextLockIdentity,
+                             LockState, SourceVersionMismatch)
 from checker.lock_policy import AccessKind, LockIdentity, ProtectionPolicy, ProtectionRule
 from checker.lockset import (
     Assessment, LockOwnership, Lockset, PreconditionStatus, Provenance, analyze, to_findings,
@@ -107,9 +108,10 @@ class LocksetTests(unittest.TestCase):
         result = self.run_nodes({"root": node([lock(), call("leaf"), write()]), "leaf": node([unlock()])})
         self.assert_assessments(result, Assessment.UNPROTECTED)
 
-    def test_callee_acquires_before_caller_write(self):
+    def test_callee_acquisition_without_release_cannot_protect_caller(self):
         result = self.run_nodes({"root": node([call("leaf"), write()]), "leaf": node([lock()])})
-        self.assert_assessments(result, Assessment.PROTECTED)
+        self.assert_assessments(result, Assessment.UNKNOWN)
+        self.assertIn("unverified_lock_escape", self.codes(result))
 
     def test_four_function_call_chain(self):
         result = self.run_nodes({"root": node([lock(), call("a")]), "a": node([call("b")]),
@@ -426,6 +428,206 @@ class LocksetTests(unittest.TestCase):
                         self.assertEqual({observed}, possible)
 
 
+class ReviewBlockerTests(unittest.TestCase):
+    run_nodes = LocksetTests.run_nodes
+    assert_assessments = LocksetTests.assert_assessments
+    codes = LocksetTests.codes
+
+    def test_unbalanced_callee_protects_own_prefix_but_not_caller(self):
+        result = self.run_nodes({"root": node([call("leaf"), write()]), "leaf": node([lock(), write()])})
+        self.assert_assessments(result, Assessment.PROTECTED, Assessment.UNKNOWN)
+        self.assertEqual(("root", "leaf"), result.accesses[0].site.path)
+        self.assertEqual(("root",), result.accesses[1].site.path)
+        leaf = next(s for s in result.summaries if s.site.function == "leaf")
+        self.assertEqual((RQ,), leaf.acquired)
+        self.assertEqual(LockState.UNKNOWN, leaf.exit.state(RQ))
+
+    def test_release_then_reacquire_entry_held_lock_is_not_a_verified_handoff(self):
+        result = self.run_nodes({"root": node([lock(), call("leaf"), write()]),
+                                 "leaf": node([unlock(), lock()])})
+        self.assert_assessments(result, Assessment.UNKNOWN)
+        leaf = next(s for s in result.summaries if s.site.function == "leaf")
+        self.assertEqual(LockState.KNOWN_HELD, leaf.entry.state(RQ))
+        self.assertEqual(LockState.UNKNOWN, leaf.exit.state(RQ))
+        self.assertEqual((RQ,), leaf.acquired)
+        self.assertEqual((RQ,), leaf.released)
+
+    def test_balanced_callee_release_propagates_definite_absence(self):
+        result = self.run_nodes({"root": node([call("leaf"), write()]),
+                                 "leaf": node([lock(), write(), unlock()])})
+        self.assert_assessments(result, Assessment.PROTECTED, Assessment.UNPROTECTED)
+        self.assertNotIn("unverified_lock_escape", self.codes(result))
+
+    def test_nested_callee_acquisition_cannot_escape_multiple_returns(self):
+        result = self.run_nodes({"root": node([call("a"), write()]), "a": node([call("b")]),
+                                 "b": node([lock(), write()])})
+        self.assert_assessments(result, Assessment.PROTECTED, Assessment.UNKNOWN)
+        self.assertEqual(("root", "a", "b"), result.accesses[0].site.path)
+        self.assertEqual(LockState.UNKNOWN, result.exits[0].locks.state(RQ))
+
+    def test_scope_uncertainty_cannot_suppress_an_unrelated_explicit_unlock(self):
+        result = self.run_nodes({"root": node([lock(), call("leaf"), unlock(), write()]),
+                                 "leaf": node([lock()])},
+                                bindings={"root": {"rq.lock": RQ}, "leaf": {"rq.lock": OTHER_RQ}})
+        self.assert_assessments(result, Assessment.UNPROTECTED)
+        self.assertEqual(LockState.KNOWN_NOT_HELD, result.exits[0].locks.state(RQ))
+        self.assertEqual(LockState.UNKNOWN, result.exits[0].locks.state(OTHER_RQ))
+
+    def test_scope_uncertainty_does_not_erase_an_unrelated_entry_lock(self):
+        result = self.run_nodes({"root": node([lock(), call("leaf"), write()]), "leaf": node([lock()])},
+                                bindings={"root": {"rq.lock": RQ}, "leaf": {"rq.lock": OTHER_RQ}})
+        self.assert_assessments(result, Assessment.PROTECTED)
+
+    def test_assertion_is_not_an_exit_lifetime_annotation(self):
+        result = self.run_nodes({"root": node([call("leaf"), write()]),
+                                 "leaf": node([lock(), {"kind": "assert_held", "lock": "rq.lock"}])})
+        self.assert_assessments(result, Assessment.UNKNOWN)
+        leaf = next(s for s in result.summaries if s.site.function == "leaf")
+        self.assertEqual(PreconditionStatus.MET, leaf.required_held[0].status)
+        self.assertEqual(1, leaf.required_held[0].site.event_index)
+        self.assertEqual(LockState.UNKNOWN, leaf.exit.state(RQ))
+
+    def test_tagged_guard_acquisitions_do_not_imply_linear_lifetime(self):
+        for op in ("guard(raw_spinlock_irqsave)", "scoped_guard(raw_spinlock)"):
+            result = self.run_nodes({"root": node([call("leaf"), write()]),
+                                     "leaf": node([lock(op=op), write()])})
+            self.assert_assessments(result, Assessment.UNKNOWN, Assessment.UNKNOWN)
+            self.assertIn("unsupported_lock_operation", self.codes(result))
+
+    def test_root_held_prefix_is_not_a_guarantee_of_held_exit(self):
+        result = self.run_nodes({"root": node([lock(), write()])})
+        self.assert_assessments(result, Assessment.PROTECTED)
+        self.assertEqual(LockState.UNKNOWN, result.exits[0].locks.state(RQ))
+
+    def test_function_summaries_keep_distinct_entry_contexts(self):
+        result = self.run_nodes({"root": node([lock(), call("leaf"), unlock(), call("leaf")]),
+                                 "leaf": node([write()])})
+        summaries = [s for s in result.summaries if s.site.function == "leaf"]
+        self.assertEqual([LockState.KNOWN_HELD, LockState.KNOWN_NOT_HELD], [s.entry.state(RQ) for s in summaries])
+        self.assertEqual([LockState.KNOWN_HELD, LockState.KNOWN_NOT_HELD], [s.exit.state(RQ) for s in summaries])
+        with self.assertRaises(FrozenInstanceError):
+            summaries[0].entry = Lockset()
+
+    def test_unknown_policy_write_is_explicit_and_adapts_to_unknown(self):
+        result = self.run_nodes({"root": node([lock(), write(line=9)])}, rules=ProtectionPolicy(()))
+        self.assertEqual((), result.accesses)
+        self.assertIn("no_write_policy", self.codes(result))
+        findings = to_findings(result, invariant="I1")
+        self.assertTrue(findings)
+        self.assertTrue(all(f["verdict"] == "unknown" for f in findings))
+        missing = next(f for f in findings if "no_write_policy" in f["evidence"][0]["detail"])
+        self.assertEqual(9, missing["evidence"][0]["line"])
+        self.assertIn(FIELD, missing["evidence"][0]["detail"])
+
+    def test_unknown_atomic_policy_is_reported_without_borrowing_write_rules(self):
+        result = self.run_nodes({"root": node([{"kind": "atomic", "field": FIELD}])})
+        self.assertEqual((), result.accesses)
+        self.assertEqual(["unknown"], [f["verdict"] for f in to_findings(result, invariant="I1")])
+
+    def test_doubling_chain_is_bounded_by_default_global_budget(self):
+        nodes = {f"f{i}": node([call(f"f{i+1}"), call(f"f{i+1}")]) for i in range(40)}
+        nodes.update({"root": node([call("f0"), write()]), "f40": node([write()])})
+        result = self.run_nodes(nodes, rules=policy("root", "f40"), max_depth=64,
+                                entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})})
+        self.assertTrue(result.work.exhausted)
+        self.assertEqual(10000, result.work.consumed)
+        self.assertLess(result.work.function_visits, 10000)
+        self.assertEqual(Assessment.UNKNOWN, result.accesses[-1].assessment)
+        self.assertEqual(("root",), result.accesses[-1].site.path)
+        self.assertIn("work_budget", self.codes(result))
+
+    def test_diamond_graph_keeps_real_paths_and_bounds_repeated_visits(self):
+        nodes = {"root": node([call("s0"), write()])}
+        for i in range(18):
+            nodes[f"s{i}"] = node([call(f"l{i}"), call(f"r{i}")])
+            nodes[f"l{i}"] = node([call(f"s{i+1}")])
+            nodes[f"r{i}"] = node([call(f"s{i+1}")])
+        nodes["s18"] = node([write()])
+        result = self.run_nodes(nodes, rules=policy("root", "s18"), max_depth=64, max_work=1500,
+                                entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})})
+        self.assertTrue(result.work.exhausted)
+        self.assertEqual(1500, result.work.consumed)
+        self.assertEqual(Assessment.UNKNOWN, result.accesses[-1].assessment)
+        for item in (*result.accesses, *result.conditions):
+            for caller, callee in zip(item.site.path, item.site.path[1:]):
+                self.assertIn(callee, [event.get("target") for event in nodes[caller]["events"]])
+
+    def test_deep_linear_path_can_complete_without_a_false_budget_cut(self):
+        nodes = {"root": node([call("f0"), write()])}
+        nodes.update({f"f{i}": node([call(f"f{i+1}")]) for i in range(90)})
+        nodes["f90"] = node([write()])
+        result = self.run_nodes(nodes, rules=policy("root", "f90"), max_depth=100,
+                                entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})})
+        self.assert_assessments(result, Assessment.PROTECTED, Assessment.PROTECTED)
+        self.assertFalse(result.work.exhausted)
+        self.assertEqual(92, result.work.function_visits)
+
+    def test_budget_cut_invalidates_held_and_absent_entry_states(self):
+        for state in (LockState.KNOWN_HELD, LockState.KNOWN_NOT_HELD):
+            result = self.run_nodes({"root": node([write(line=7)])}, max_work=1,
+                                    entry_states={"root": Lockset.from_mapping({RQ: state})})
+            self.assert_assessments(result, Assessment.UNKNOWN)
+            self.assertEqual(7, result.accesses[0].site.line)
+            self.assertEqual(LockState.UNKNOWN, result.exits[0].locks.state(RQ))
+
+    def test_budget_is_shared_across_sorted_roots(self):
+        fixture = graph({"a": node([]), "b": node([write()])}, roots=("b", "a"))
+        result = analyze(fixture, policy("b"), max_work=1, provenance=TRUSTED,
+                         entry_states={"b": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})})
+        self.assertEqual(1, result.work.function_visits)
+        self.assertEqual(["a", "b"], [s.root for s in result.exits])
+        self.assertEqual(Assessment.UNKNOWN, result.accesses[0].assessment)
+        self.assertEqual(("b",), result.accesses[0].site.path)
+
+    def test_exact_budget_boundary_is_not_itself_exhaustion(self):
+        result = self.run_nodes({"root": node([])}, max_work=1)
+        self.assertEqual(1, result.work.consumed)
+        self.assertFalse(result.work.exhausted)
+
+    def test_metadata_work_is_charged_and_cannot_escape_the_budget(self):
+        nodes = {"root": node([*[call("leaf", line=i) for i in range(100)], write()]), "leaf": node([])}
+        result = self.run_nodes(nodes, rules=policy("root"), max_work=25)
+        self.assertTrue(result.work.exhausted)
+        self.assertGreater(result.work.metadata, 0)
+        self.assertEqual(25, result.work.consumed)
+        self.assert_assessments(result, Assessment.UNKNOWN)
+
+    def test_budget_gap_with_no_observed_access_is_still_an_unknown_finding(self):
+        result = self.run_nodes({"root": node([call("leaf")]), "leaf": node([])}, max_work=1)
+        self.assertEqual((), result.accesses)
+        findings = to_findings(result, invariant="I1")
+        self.assertTrue(findings)
+        self.assertTrue(all(f["verdict"] == "unknown" for f in findings))
+        self.assertIn("work_budget", findings[0]["evidence"][0]["detail"])
+
+    def test_opaque_or_missing_callee_without_an_observed_access_stays_explicit(self):
+        for nodes in ({"root": node([call("missing")])},
+                      {"root": node([call("opaque")]), "opaque": node([], kind="external")}):
+            result = self.run_nodes(nodes)
+            self.assertEqual((), result.accesses)
+            findings = to_findings(result, invariant="I1")
+            self.assertTrue(findings)
+            self.assertTrue(all(f["verdict"] == "unknown" for f in findings))
+
+    def test_budget_results_do_not_depend_on_unordered_adjacency(self):
+        fixture = graph({"root": node([call("a"), call("b"), write()]), "a": node([]), "b": node([])})
+        before = analyze(fixture, policy("root"), provenance=TRUSTED, max_work=8).to_json()
+        fixture["nodes"]["root"]["callees"].reverse()
+        after = analyze(fixture, policy("root"), provenance=TRUSTED, max_work=8).to_json()
+        self.assertEqual(before, after)
+
+    def test_work_statistics_account_for_all_charged_units(self):
+        result = self.run_nodes({"root": node([lock(), write(), unlock()])})
+        self.assertEqual(result.work.consumed,
+                         result.work.function_visits + result.work.events + result.work.metadata)
+        self.assertLessEqual(result.work.consumed, result.work.limit)
+
+    def test_invalid_work_limits_are_explicit(self):
+        for limit in (0, -1, True, None, 1.5, "100", 1000001):
+            with self.subTest(limit=limit), self.assertRaisesRegex(ValueError, "max_work"):
+                self.run_nodes({"root": node([])}, max_work=limit)
+
+
 class InputAndContextTests(unittest.TestCase):
     def test_same_callee_reached_with_held_and_unknown_states(self):
         fixture = graph({"a": node([lock(), call("leaf")]), "b": node([call("leaf")]), "leaf": node([write()])},
@@ -492,9 +694,11 @@ class InputAndContextTests(unittest.TestCase):
             analyze(fixture, policy("root"))
 
     def c2_analysis(self, *, version=SOURCE_VERSION, commit=SOURCE_COMMIT, entry_states=None, bindings=None,
-                    callback="dispatch"):
+                    callback="dispatch", context_bindings=None):
         return analyze(graph({"root": node([write()])}, version=version), policy("root"),
                        callbacks={"root": callback}, bindings={"root": {"rq": RQ}} if bindings is None else bindings,
+                       context_bindings=({"root": {ContextLockIdentity("rq", "dispatch.cpu:cpu"): RQ}}
+                                         if context_bindings is None and bindings is None else context_bindings),
                        entry_states=entry_states,
                        provenance=Provenance(commit, complete_events=True, linear_events=True, synthetic=True))
 
@@ -518,6 +722,68 @@ class InputAndContextTests(unittest.TestCase):
         result = self.c2_analysis(entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})})
         self.assertEqual(Assessment.PROTECTED, result.accesses[0].assessment)
         self.assertEqual(PreconditionStatus.MET, result.preconditions[0].status)
+
+    def test_c2_local_name_binding_alone_cannot_identify_the_callback_rq(self):
+        result = self.c2_analysis(entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})},
+                                  context_bindings={})
+        self.assertEqual(Assessment.UNKNOWN, result.accesses[0].assessment)
+        self.assertIsNone(result.preconditions[0].lock)
+
+    def test_c2_wrong_cpu_identity_cannot_satisfy_callback_rq_requirement(self):
+        result = self.c2_analysis(entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})},
+                                  context_bindings={"root": {ContextLockIdentity("rq", "dispatch.cpu:other"): RQ}})
+        self.assertEqual(Assessment.UNKNOWN, result.accesses[0].assessment)
+        self.assertEqual(PreconditionStatus.UNPROVEN, result.preconditions[0].status)
+
+    def test_c2_conditional_callback_requires_explicit_matching_config_and_identities(self):
+        pi = LockIdentity("p0.pi_lock")
+        fixture = graph({"root": node([write()])}, version=SOURCE_VERSION)
+        identities = {"root": {ContextLockIdentity("rq", "cgroup_move.task:p"): RQ,
+                               ContextLockIdentity("pi_lock", "cgroup_move.task:p"): pi}}
+        states = {"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD, pi: LockState.KNOWN_HELD})}
+        for configs, expected in ((None, Assessment.UNKNOWN), (("CONFIG_EXT_GROUP_SCHED",), Assessment.PROTECTED)):
+            with self.subTest(configs=configs):
+                result = analyze(fixture, policy("root"), callbacks={"root": "cgroup_move"},
+                                 context_bindings=identities, entry_states=states,
+                                 provenance=Provenance(SOURCE_COMMIT, True, True, True, configs))
+                self.assertEqual(expected, result.accesses[0].assessment)
+                if configs is None:
+                    self.assertIn("unknown_callback_configuration", {c.code for c in result.conditions})
+
+    def test_c2_read_side_ownership_cannot_be_promoted_to_exclusive_protection(self):
+        sem = LockIdentity("scx_cgroup_ops_rwsem")
+        result = analyze(graph({"root": node([write()])}, version=SOURCE_VERSION), policy("root"),
+                         callbacks={"root": "cgroup_set_weight"},
+                         context_bindings={"root": {ContextLockIdentity("scx_cgroup_ops_rwsem", "global:scx_cgroup_ops_rwsem"): sem}},
+                         entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD, sem: LockState.KNOWN_HELD})},
+                         provenance=Provenance(SOURCE_COMMIT, True, True, True, ("CONFIG_EXT_GROUP_SCHED",)))
+        self.assertEqual(Assessment.UNKNOWN, result.accesses[0].assessment)
+        self.assertIn("unsupported_entry_lock_mode", {c.code for c in result.conditions})
+
+    def test_c2_init_task_unknown_rq_is_not_injected_as_definitely_absent(self):
+        pi = LockIdentity("p0.pi_lock")
+        result = analyze(graph({"root": node([write()])}, version=SOURCE_VERSION), policy("root"),
+                         callbacks={"root": "init_task"},
+                         context_bindings={"root": {ContextLockIdentity("pi_lock", "init_task.task:p"): pi}},
+                         entry_states={"root": Lockset.from_mapping({pi: LockState.KNOWN_NOT_HELD})},
+                         provenance=Provenance(SOURCE_COMMIT, True, True, True))
+        self.assertEqual(Assessment.UNKNOWN, result.accesses[0].assessment)
+        self.assertEqual(LockState.UNKNOWN, result.accesses[0].observed)
+
+    def test_c2_context_bindings_require_typed_object_identities(self):
+        with self.assertRaises(TypeError):
+            self.c2_analysis(context_bindings={"root": {"rq": RQ}})
+        with self.assertRaises(TypeError):
+            self.c2_analysis(context_bindings={"root": {ContextLockIdentity("rq", "dispatch.cpu:cpu"): "rq"}})
+
+    def test_config_provenance_is_immutable_and_rejects_ambiguous_mappings(self):
+        configs = ["CONFIG_EXT_GROUP_SCHED", "CONFIG_EXT_GROUP_SCHED"]
+        provenance = Provenance(enabled_configs=configs)
+        configs.clear()
+        self.assertEqual(("CONFIG_EXT_GROUP_SCHED",), provenance.enabled_configs)
+        for invalid in ("CONFIG_EXT_GROUP_SCHED", {"CONFIG_EXT_GROUP_SCHED": False}, [True], ["bad"]):
+            with self.subTest(configs=invalid), self.assertRaises((TypeError, ValueError)):
+                Provenance(enabled_configs=invalid)
 
     def test_c2_unresolved_lock_alias_is_not_guessed(self):
         result = self.c2_analysis(bindings={})
