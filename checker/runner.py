@@ -5,6 +5,8 @@ C1 only builds the trustworthy boundary. It does not infer semantic safety.
 from __future__ import annotations
 
 import json
+import re
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +18,27 @@ from .checkers import Finding, registered
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def require_compatible_dependencies() -> None:
+    """Fail before schema resolution when an unsupported system package is used."""
+    for package, lower, upper, requirement in (
+        ("jsonschema", (4, 18, 0), (5, 0, 0), "jsonschema>=4.18,<5"),
+        ("PyYAML", (6, 0, 3), (7, 0, 0), "PyYAML>=6.0.3,<7"),
+    ):
+        try:
+            installed = version(package)
+        except PackageNotFoundError as exc:
+            raise ValueError(f"missing {package} metadata; install -r checker/requirements.txt") from exc
+        release = re.fullmatch(r"(\d+)\.(\d+)(?:\.(\d+))?(?:\.post\d+)?(?:\+[A-Za-z0-9.]+)?", installed)
+        parsed = tuple(int(part or 0) for part in release.groups()) if release else None
+        if parsed is None or not lower <= parsed < upper:
+            raise ValueError(f"requires {requirement}; found {installed}. "
+                             "Run python -m pip install -r checker/requirements.txt")
+
+
 def load_data(path: Path) -> dict[str, Any]:
     """Load JSON or YAML, rejecting arrays and scalars at the document root."""
+    if path.is_dir():
+        raise ValueError(f"expected one JSON or YAML file, got a directory: {path}")
     if not path.is_file():
         raise ValueError(f"file not found: {path}")
     with path.open(encoding="utf-8") as fh:
@@ -31,6 +52,7 @@ def validate(kind: str, data: dict[str, Any]) -> None:
     """Validate data against the repository's JSON Schema contract."""
     if kind not in {"callgraph", "catalog", "findings"}:
         raise ValueError(f"unknown contract: {kind}")
+    require_compatible_dependencies()
     schema = json.loads((ROOT / "contracts" / f"{kind}.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator.check_schema(schema)
     jsonschema.Draft202012Validator(schema).validate(data)

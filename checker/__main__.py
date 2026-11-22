@@ -13,12 +13,22 @@ from .checkers import registered
 from .runner import ROOT, check, load_data, validate
 
 
+def portable_callgraph_path(path: Path) -> str:
+    """Use repository-relative POSIX paths, with an absolute fallback outside it."""
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(ROOT).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="scxa", description="sched_ext constraint analyzer")
     commands = parser.add_subparsers(dest="command", required=True)
     cmd = commands.add_parser("check", help="validate inputs and run semantic checker plugins")
     cmd.add_argument("--callgraph", type=Path, default=ROOT / "contracts/fixtures/callgraph.example.json")
-    cmd.add_argument("--catalog", type=Path, default=ROOT / "contracts/fixtures/catalog.example.yaml")
+    cmd.add_argument("--catalog", type=Path, default=ROOT / "contracts/fixtures/catalog.example.yaml",
+                     help="one JSON or YAML catalog file (directory input is not supported)")
     cmd.add_argument("-o", "--output", type=Path, help="write findings JSON (otherwise stdout)")
     args = parser.parse_args(argv)
 
@@ -27,7 +37,8 @@ def main(argv: list[str] | None = None) -> int:
         catalog = load_data(args.catalog)
         has_checkers = bool(registered())
         findings = check(graph, catalog)
-        output = {"kernel_version": graph["kernel_version"], "callgraph": str(args.callgraph), "findings": findings}
+        output = {"kernel_version": graph["kernel_version"],
+                  "callgraph": portable_callgraph_path(args.callgraph), "findings": findings}
         validate("findings", output)
         serialized = json.dumps(output, indent=2, sort_keys=True, allow_nan=False) + "\n"
         if args.output is not None:
@@ -41,7 +52,10 @@ def main(argv: list[str] | None = None) -> int:
         elif not findings:
             print("note: installed checkers returned 0 findings (no safety claim)", file=sys.stderr)
         return 0
-    except (OSError, ValueError, TypeError, jsonschema.ValidationError, jsonschema.SchemaError, yaml.YAMLError) as exc:
+    except (jsonschema.ValidationError, jsonschema.SchemaError) as exc:
+        print(f"scxa check: {exc.json_path}: {exc.message}", file=sys.stderr)
+        return 2
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
         print(f"scxa check: {exc}", file=sys.stderr)
         return 2
 
