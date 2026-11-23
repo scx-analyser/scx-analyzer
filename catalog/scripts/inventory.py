@@ -67,32 +67,99 @@ def normalize_flags(raw):
     return "|".join(flags)
 
 
+RE_ATOM = re.compile(r"^!?(\w+|defined\s*\(\s*\w+\s*\))$")
+
+
+def strip_comment(cond):
+    return cond.split("/*")[0].split("//")[0].strip()
+
+
+def is_atom(cond):
+    """True for `X`, `!X`, `defined(X)`, `!defined(X)` and fully parenthesized `!(...)`."""
+    if RE_ATOM.match(cond):
+        return True
+    return cond.startswith("!(") and cond.endswith(")") and balanced(cond[2:-1])
+
+
+def balanced(s):
+    depth = 0
+    for ch in s:
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        if depth < 0:
+            return False
+    return depth == 0
+
+
+def negate(cond):
+    if cond.startswith("!") and RE_ATOM.match(cond):
+        return cond[1:]
+    return f"!{cond}" if RE_ATOM.match(cond) else f"!({cond})"
+
+
+def conjoin(terms):
+    return " && ".join(t if is_atom(t) or len(terms) == 1 else f"({t})" for t in terms)
+
+
+class CondTracker:
+    """Tracks the preprocessor condition that is active at the current line.
+
+    Each open #if level remembers the conditions of all its earlier branches
+    and the condition of the current branch (None after #else). The active
+    condition of a level is the negation of every earlier branch plus the
+    current one, so `#if A / #elif B / #elif C` yields `!A && !B && C`.
+    """
+
+    def __init__(self):
+        self.levels = []  # [(earlier branch conditions, current condition or None)]
+
+    def feed(self, line):
+        """Update the state for `line`; return True if it was a conditional directive."""
+        m = RE_IF.match(line)
+        if m:
+            kind, cond = m.group(1), strip_comment(m.group(2))
+            self.levels.append(([], negate(cond) if kind == "ifndef" else cond))
+            return True
+        m = RE_ELSE.match(line)
+        if m:
+            if self.levels:
+                earlier, cur = self.levels.pop()
+                if cur is not None:
+                    earlier = earlier + [cur]
+                new = strip_comment(m.group(2)) if m.group(1) == "elif" else None
+                self.levels.append((earlier, new))
+            return True
+        if RE_ENDIF.match(line):
+            if self.levels:
+                self.levels.pop()
+            return True
+        return False
+
+    def terms(self):
+        out = []
+        for earlier, cur in self.levels:
+            out.extend(negate(c) for c in earlier)
+            if cur is not None:
+                out.append(cur)
+        return out
+
+    def condition(self):
+        return conjoin(self.terms())
+
+
 def scan_file(path, rel):
     """Return (entries, definitions) for one source file."""
-    text = path.read_text(errors="replace")
+    return scan_text(path.read_text(errors="replace"), rel)
+
+
+def scan_text(text, rel):
+    """Return (entries, definitions) for the contents of one source file."""
     lines = text.splitlines()
 
     entries = []
     cur_set = None
-    cond_stack = []  # list of condition strings for enclosing #if blocks
+    conds = CondTracker()
     for lineno, line in enumerate(lines, 1):
-        m = RE_IF.match(line)
-        if m:
-            kind, cond = m.group(1), m.group(2).split("/*")[0].strip()
-            cond_stack.append(f"!{cond}" if kind == "ifndef" else cond)
-            continue
-        m = RE_ELSE.match(line)
-        if m and cond_stack:
-            prev = cond_stack.pop()
-            neg = prev[1:] if prev.startswith("!") and " " not in prev else f"!({prev})"
-            if m.group(1) == "else":
-                cond_stack.append(neg)
-            else:  # #elif: previous branch false and the new condition true
-                cond_stack.append(f"{neg} && {m.group(2).split('/*')[0].strip()}")
-            continue
-        if RE_ENDIF.match(line):
-            if cond_stack:
-                cond_stack.pop()
+        if conds.feed(line):
             continue
         m = RE_START.match(line)
         if m:
@@ -110,7 +177,7 @@ def scan_file(path, rel):
                 "name": m.group(1),
                 "kfunc_set": cur_set,
                 "flags": normalize_flags(m.group(2)),
-                "config": " && ".join(cond_stack),
+                "config": conds.condition(),
                 "set_entry_location": f"{rel}:{lineno}",
             })
     if cur_set:
