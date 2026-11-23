@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=ok
+ * scxa: invariant=I1 expect=ok kfunc=scx_bpf_dsq_move_to_local rule=I1.dispatch_only.context
  *
  * scx_bpf_dsq_move_to_local() is in the dispatch kfunc set; ops.dispatch may call it.
  * It only moves from user-created DSQs (built-in ones such as SCX_DSQ_GLOBAL are a runtime error).

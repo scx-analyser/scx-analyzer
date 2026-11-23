@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=verifier_reject
+ * scxa: invariant=I1 expect=verifier_reject kfunc=scx_bpf_dsq_move_to_local rule=I1.dispatch_only.context reason="scx_bpf_dsq_move_to_local is not allowed"
  *
  * scx_bpf_dsq_move_to_local() is dispatch-only; scx_kfunc_context_filter() rejects the
  * call from ops.enqueue at load time.
