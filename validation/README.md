@@ -34,9 +34,13 @@ Config: virtme-ng's minimal config + `tools/testing/selftests/sched_ext/config` 
 
 ```sh
 sudo apt install build-essential flex bison bc cpio libelf-dev libssl-dev zlib1g-dev \
-  dwarves clang llvm lld qemu-system-x86 busybox-static   # qemu-system-arm on arm64
+  clang llvm lld qemu-system-x86 busybox-static   # qemu-system-arm on arm64
 pip install virtme-ng
 ```
+
+Plus **pahole >= 1.27** (Ubuntu 24.04 ships 1.25): without its `bpf_kfunc` decl tags, kfuncs with implicit
+arguments get the wrong BTF prototype and most selftests fail with `func_proto ... incompatible with vmlinux`.
+Build it from source as the CI workflow does (tag v1.30). The script refuses to run with an older pahole.
 
 **macOS:** run the script inside a Linux VM (UTM, Lima, OrbStack). Apple M1/M2 have no nested virtualization,
 so the inner VM falls back to TCG emulation: slow but works. Allow ~15 GB of disk for the kernel build.

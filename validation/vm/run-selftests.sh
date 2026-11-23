@@ -10,6 +10,13 @@ repo=$(cd "$(dirname "$0")/../.." && pwd)
 ksrc=${KERNEL_SRC:-$HOME/linux}
 commit=${KERNEL_COMMIT:-$(cat "$repo/KERNEL_COMMIT")}
 
+# v7.1 kfuncs with implicit args only get correct BTF when pahole emits bpf_kfunc decl tags (1.27+)
+pahole_ver=$(pahole --version | tr -dc 0-9)
+if [ "${pahole_ver:-0}" -lt 127 ]; then
+	echo "error: pahole >= 1.27 required, found $(pahole --version)" >&2
+	exit 1
+fi
+
 if [ ! -d "$ksrc/.git" ]; then
 	git init -q "$ksrc"
 	git -C "$ksrc" fetch --depth 1 https://github.com/torvalds/linux.git "$commit"
