@@ -34,11 +34,11 @@ python3 catalog/scripts/inventory.py     # kernel tree: $KERNEL_SRC, else ~/linu
 
 Python 3 stdlib only. The script scans every `*.c`/`*.h` under `kernel/sched/`
 for `BTF_KFUNCS_START(set) ... BTF_ID_FLAGS(func, name, flags) ... BTF_KFUNCS_END(set)`
-blocks and for `__bpf_kfunc` definitions, prints per-set counts to stderr, and
-warns if a set entry has no `__bpf_kfunc` definition. Output is sorted by
-`(name, kfunc_set)`, so reruns are byte-identical.
+blocks and for `__bpf_kfunc` definitions and prints per-set counts to stderr.
+Output is sorted by `(name, kfunc_set)`, so reruns are byte-identical.
 
-It fails without writing anything if the kernel tree's HEAD is not the
+It fails without writing anything if a set entry has no `__bpf_kfunc`
+definition under `kernel/sched/`, if the kernel tree's HEAD is not the
 `KERNEL_COMMIT` commit, if the `KERNEL_VERSION` tag points elsewhere in that
 tree, or if `kernel/sched/` has local changes. For an exploratory run against
 another tree, pass `--allow-kernel-mismatch` (and `--output -` or another path,

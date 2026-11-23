@@ -211,6 +211,17 @@ class PinnedRunTest(unittest.TestCase):
         self.pin("v0.1", "v0.1")
         self.assertFails()
 
+    def test_missing_definition_fails(self):
+        self.write_kernel(KERNEL_C.replace(
+            "BTF_ID_FLAGS(func, scx_bpf_foo)",
+            "BTF_ID_FLAGS(func, scx_bpf_foo)\nBTF_ID_FLAGS(func, scx_bpf_ghost)"))
+        self.git("commit", "-q", "-am", "ghost")
+        self.pin("v0.1", self.git("rev-parse", "HEAD"))
+        self.git("tag", "-f", "v0.1")
+        _, err = self.assertFails()
+        self.assertIn("kernel/sched/ext.c:6: scx_bpf_ghost in set_a has no __bpf_kfunc", err)
+        self.assertNotIn("scx_bpf_foo", err)
+
     def test_override_only_warns(self):
         self.write_kernel(KERNEL_C + "\n")
         self.git("commit", "-q", "-am", "v1")

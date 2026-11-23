@@ -260,12 +260,15 @@ def main(argv=None, repo_root=REPO_ROOT):
         for name, loc in d.items():
             defs.setdefault(name, loc)
 
-    rows = []
-    for e in entries:
-        loc = defs.get(e["name"])
-        if loc is None:
-            print(f"warning: no __bpf_kfunc definition found for {e['name']}", file=sys.stderr)
-        rows.append({**e, "def_location": loc or ""})
+    missing = [e for e in entries if e["name"] not in defs]
+    if missing:
+        for e in missing:
+            print(f"error: {e['set_entry_location']}: {e['name']} in {e['kfunc_set']} "
+                  f"has no __bpf_kfunc definition under {SCAN_DIR}/", file=sys.stderr)
+        sys.exit(f"error: {len(missing)} kfunc set entries without a definition; "
+                 f"nothing written")
+
+    rows = [{**e, "def_location": defs[e["name"]]} for e in entries]
     rows.sort(key=lambda r: (r["name"], r["kfunc_set"]))
 
     out = sys.stdout if args.output == "-" else open(args.output, "w", newline="")
