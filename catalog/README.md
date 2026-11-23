@@ -17,13 +17,16 @@ Starting point: `contracts/fixtures/catalog.example.yaml`.
 
 ## kfunc inventory (`kfuncs.csv`)
 
-Pinned kernel: see `/KERNEL_VERSION` (currently **v7.1**). Every line number in
-`kfuncs.csv` refers to that tag.
+Pinned kernel: the tag in `/KERNEL_VERSION` (currently **v7.1**) and its full
+commit SHA in `/KERNEL_COMMIT`. Every line number in `kfuncs.csv` refers to that
+commit. The pin is provisional until the course kernel is confirmed. To change
+it, update both files (`git -C ~/linux rev-parse <tag>^{commit}` gives the SHA),
+check out the new tag and regenerate.
 
 ### Regenerating
 
 ```sh
-cd ~/linux && git checkout v7.1          # must match KERNEL_VERSION
+cd ~/linux && git checkout v7.1          # must be the commit in KERNEL_COMMIT
 cd <scx-analyzer>
 python3 catalog/scripts/inventory.py     # kernel tree: $KERNEL_SRC, else ~/linux
 # or: python3 catalog/scripts/inventory.py --kernel-src /path/to/linux [--output -]
@@ -32,9 +35,16 @@ python3 catalog/scripts/inventory.py     # kernel tree: $KERNEL_SRC, else ~/linu
 Python 3 stdlib only. The script scans every `*.c`/`*.h` under `kernel/sched/`
 for `BTF_KFUNCS_START(set) ... BTF_ID_FLAGS(func, name, flags) ... BTF_KFUNCS_END(set)`
 blocks and for `__bpf_kfunc` definitions, prints per-set counts to stderr, and
-warns if the kernel tree is not at the `KERNEL_VERSION` tag or a set entry has
-no `__bpf_kfunc` definition. Output is sorted by `(name, kfunc_set)`, so reruns
-are byte-identical.
+warns if a set entry has no `__bpf_kfunc` definition. Output is sorted by
+`(name, kfunc_set)`, so reruns are byte-identical.
+
+It fails without writing anything if the kernel tree's HEAD is not the
+`KERNEL_COMMIT` commit, if the `KERNEL_VERSION` tag points elsewhere in that
+tree, or if `kernel/sched/` has local changes. For an exploratory run against
+another tree, pass `--allow-kernel-mismatch` (and `--output -` or another path,
+so the pinned CSV is not overwritten).
+
+Tests: `python3 -m unittest discover -s catalog/scripts -p 'test_*.py'`.
 
 Sanity check: `grep -c '^BTF_ID_FLAGS(func' kernel/sched/ext.c kernel/sched/ext_idle.c`
 gives 52 + 14 = 66, equal to the number of CSV rows.

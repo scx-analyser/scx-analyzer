@@ -8,9 +8,13 @@ and for `__bpf_kfunc` function definitions, and writes one CSV row per
 
 Usage:
     python3 catalog/scripts/inventory.py [--kernel-src PATH] [--output PATH]
+                                         [--allow-kernel-mismatch]
 
-The kernel source defaults to $KERNEL_SRC, then ~/linux. It should be checked
-out at the tag in KERNEL_VERSION (the script warns if `git describe` disagrees).
+The kernel source defaults to $KERNEL_SRC, then ~/linux. The pin is the tag in
+KERNEL_VERSION plus its full commit SHA in KERNEL_COMMIT. The tree's HEAD must
+be that commit and kernel/sched/ must have no local changes; otherwise the
+script fails before writing anything. --allow-kernel-mismatch turns this into
+a warning for exploratory runs against another tree.
 Stdlib only.
 """
 
@@ -23,7 +27,6 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT = REPO_ROOT / "catalog" / "kfuncs.csv"
 SCAN_DIR = "kernel/sched"
 
 COLUMNS = ["name", "kfunc_set", "flags", "config", "def_location", "set_entry_location"]
@@ -38,9 +41,13 @@ RE_ENDIF = re.compile(r"^\s*#\s*endif\b")
 RE_DEF = re.compile(r"^__bpf_kfunc\b[^;{(]*?\b(\w+)\s*\(", re.MULTILINE)
 
 
-def read_kernel_version():
+RE_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+def read_pin_file(path):
+    """First non-empty, non-comment line of a pin file, or None if absent."""
     try:
-        for line in (REPO_ROOT / "KERNEL_VERSION").read_text().splitlines():
+        for line in Path(path).read_text().splitlines():
             line = line.strip()
             if line and not line.startswith("#"):
                 return line
@@ -49,15 +56,43 @@ def read_kernel_version():
     return None
 
 
-def git_describe(src):
+def read_pin(repo_root):
+    """Return (tag, commit) from KERNEL_VERSION and KERNEL_COMMIT; exit if invalid."""
+    tag = read_pin_file(Path(repo_root) / "KERNEL_VERSION")
+    commit = read_pin_file(Path(repo_root) / "KERNEL_COMMIT")
+    if not tag:
+        sys.exit(f"error: {repo_root}/KERNEL_VERSION is missing or empty")
+    if not commit or not RE_SHA.match(commit):
+        sys.exit(f"error: {repo_root}/KERNEL_COMMIT must hold the full 40-hex commit SHA "
+                 f"of {tag} (got {commit!r})")
+    return tag, commit
+
+
+def git(src, *args):
+    """Stripped stdout of a git command in `src`, or None if it fails."""
     try:
-        out = subprocess.run(
-            ["git", "-C", str(src), "describe", "--tags", "--exact-match"],
-            capture_output=True, text=True, check=False,
-        )
+        out = subprocess.run(["git", "-C", str(src), *args],
+                             capture_output=True, text=True, check=False)
     except OSError:
         return None
-    return out.stdout.strip() or None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def kernel_problems(src, tag, commit):
+    """List why the tree at `src` is not the pinned kernel (empty if it is)."""
+    head = git(src, "rev-parse", "--verify", "HEAD^{commit}")
+    if head is None:
+        return [f"{src} is not a git tree, so its commit cannot be verified"]
+    problems = []
+    tag_commit = git(src, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}")
+    if tag_commit is not None and tag_commit != commit:
+        problems.append(f"tag {tag} is {tag_commit} in {src}, but KERNEL_COMMIT pins {commit}")
+    if head != commit:
+        problems.append(f"{src} HEAD is {head}, expected {commit} ({tag})")
+    dirty = git(src, "status", "--porcelain", "--untracked-files=no", "--", SCAN_DIR)
+    if dirty:
+        problems.append(f"{src}/{SCAN_DIR} has local changes")
+    return problems
 
 
 def normalize_flags(raw):
@@ -190,23 +225,32 @@ def scan_text(text, rel):
     return entries, defs
 
 
-def main():
+def main(argv=None, repo_root=REPO_ROOT):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--kernel-src", default=os.environ.get("KERNEL_SRC", "~/linux"),
                     help="kernel source tree (default: $KERNEL_SRC or ~/linux)")
-    ap.add_argument("--output", default=str(DEFAULT_OUTPUT), help="CSV to write ('-' for stdout)")
-    args = ap.parse_args()
+    ap.add_argument("--output", default=str(Path(repo_root) / "catalog" / "kfuncs.csv"),
+                    help="CSV to write ('-' for stdout)")
+    ap.add_argument("--allow-kernel-mismatch", action="store_true",
+                    help="only warn if the tree is not the commit in KERNEL_COMMIT "
+                         "(exploratory runs; the output then does not describe the pin)")
+    args = ap.parse_args(argv)
 
     src = Path(args.kernel_src).expanduser().resolve()
     scan_root = src / SCAN_DIR
     if not scan_root.is_dir():
         sys.exit(f"error: {scan_root} not found; pass --kernel-src or set KERNEL_SRC")
 
-    pinned, actual = read_kernel_version(), git_describe(src)
-    if pinned and pinned != actual:
-        where = f"is at {actual}" if actual else "is not at an exact tag (or not a git tree)"
-        print(f"warning: KERNEL_VERSION is {pinned} but {src} {where}; "
-              f"line numbers will not match {pinned}", file=sys.stderr)
+    tag, commit = read_pin(repo_root)
+    problems = kernel_problems(src, tag, commit)
+    if problems:
+        level = "warning" if args.allow_kernel_mismatch else "error"
+        for p in problems:
+            print(f"{level}: {p}", file=sys.stderr)
+        if not args.allow_kernel_mismatch:
+            sys.exit(f"error: kernel tree does not match the pin ({tag} = {commit}); check out "
+                     f"{tag} or pass --allow-kernel-mismatch for an exploratory run")
+    actual = f"{tag} ({commit[:12]})" if not problems else "unpinned"
 
     entries, defs = [], {}
     for path in sorted(scan_root.rglob("*.c")) + sorted(scan_root.rglob("*.h")):
@@ -238,7 +282,7 @@ def main():
         per_set[r["kfunc_set"]] = per_set.get(r["kfunc_set"], 0) + 1
     unique = len({r["name"] for r in rows})
     print(f"{len(rows)} rows, {unique} unique kfuncs, {len(per_set)} sets"
-          f" (kernel {actual or 'unknown'})", file=sys.stderr)
+          f" (kernel {actual})", file=sys.stderr)
     for s in sorted(per_set):
         print(f"  {s}: {per_set[s]}", file=sys.stderr)
     unlisted = sorted(set(defs) - {r["name"] for r in rows})

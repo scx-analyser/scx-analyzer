@@ -4,7 +4,13 @@
     python3 -m unittest discover -s catalog/scripts -p 'test_*.py'
 """
 
+import contextlib
+import io
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
@@ -114,6 +120,104 @@ class PreprocessorTest(unittest.TestCase):
         self.assertEqual(entries[0]["kfunc_set"], "set_a")
         self.assertEqual(entries[0]["flags"], "KF_RCU|KF_TRUSTED_ARGS")
         self.assertEqual(entries[0]["set_entry_location"], "kernel/sched/t.c:6")
+
+
+KERNEL_C = textwrap.dedent("""\
+    __bpf_kfunc void scx_bpf_foo(void)
+    {
+    }
+    BTF_KFUNCS_START(set_a)
+    BTF_ID_FLAGS(func, scx_bpf_foo)
+    BTF_KFUNCS_END(set_a)
+""")
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class PinnedRunTest(unittest.TestCase):
+    """Runs main() against a throwaway git "kernel" tree and pin files."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.kernel = self.tmp / "linux"
+        (self.kernel / "kernel" / "sched").mkdir(parents=True)
+        self.write_kernel(KERNEL_C)
+        self.git("init", "-q")
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "v0")
+        self.git("tag", "v0.1")
+        self.commit = self.git("rev-parse", "HEAD")
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self.pin("v0.1", self.commit)
+        self.out = self.tmp / "kfuncs.csv"
+
+    def git(self, *args):
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com")
+        return subprocess.run(["git", "-C", str(self.kernel), *args], env=env, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def write_kernel(self, text):
+        (self.kernel / "kernel" / "sched" / "ext.c").write_text(text)
+
+    def pin(self, tag, commit):
+        (self.repo / "KERNEL_VERSION").write_text(f"{tag}\n")
+        (self.repo / "KERNEL_COMMIT").write_text(f"{commit}\n")
+
+    def run_main(self, *extra):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            try:
+                inventory.main(["--kernel-src", str(self.kernel), "--output", str(self.out),
+                                *extra], repo_root=self.repo)
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, err.getvalue()
+
+    def assertFails(self, *extra):
+        code, err = self.run_main(*extra)
+        self.assertNotIn(code, (0, None), err)
+        self.assertFalse(self.out.exists(), "CSV written despite the failure")
+        return code, err
+
+    def test_matching_pin_writes_csv(self):
+        code, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.out.read_text().splitlines()[1],
+                         "scx_bpf_foo,set_a,,,kernel/sched/ext.c:1,kernel/sched/ext.c:5")
+
+    def test_head_mismatch_fails(self):
+        self.write_kernel(KERNEL_C + "\n")
+        self.git("commit", "-q", "-am", "v1")
+        _, err = self.assertFails()
+        self.assertIn("HEAD is", err)
+
+    def test_pin_disagrees_with_tag_fails(self):
+        self.write_kernel(KERNEL_C + "\n")
+        self.git("commit", "-q", "-am", "v1")
+        self.pin("v0.1", self.git("rev-parse", "HEAD"))
+        _, err = self.assertFails()
+        self.assertIn("tag v0.1 is", err)
+
+    def test_dirty_tree_fails(self):
+        self.write_kernel(KERNEL_C + "/* local edit */\n")
+        _, err = self.assertFails()
+        self.assertIn("local changes", err)
+
+    def test_invalid_commit_pin_fails(self):
+        self.pin("v0.1", "v0.1")
+        self.assertFails()
+
+    def test_override_only_warns(self):
+        self.write_kernel(KERNEL_C + "\n")
+        self.git("commit", "-q", "-am", "v1")
+        code, err = self.run_main("--allow-kernel-mismatch")
+        self.assertEqual(code, 0, err)
+        self.assertIn("warning:", err)
+        self.assertTrue(self.out.exists())
 
 
 if __name__ == "__main__":
