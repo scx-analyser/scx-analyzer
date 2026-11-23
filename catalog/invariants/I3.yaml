@@ -1,0 +1,659 @@
+# Invariant family I3 - CPU, affinity and argument validity checks that must
+# dominate scheduling-state modifications.
+#
+# Source of truth: Linux v7.1 (commit below), the course kernel:
+# kernel/sched/ext.c, kernel/sched/ext_idle.c, kernel/sched/sched.h,
+# include/linux/sched/ext.h. Write-up: I3.md.
+#
+# Structure: one family entry (id I3). Every rule is role: protection. Each
+# obligation names one write (struct, fields, instance, op) at its source
+# sites and the predicate that must hold there, with the function that
+# evaluates it (evaluated_at / checked_by) and what the source does when it
+# fails (on_failure). The dominance shape is stated in each predicate note as
+# "guard -> failure edge -> write":
+# - early return: `if (!guard) return;` before the write (scx_kick_cpu);
+# - branch: the write sits inside `if (guard) { ... }` and the false edge
+#   skips it without a return (scx_bpf_cpuperf_set);
+# - fallback: the failing argument is replaced (global DSQ) and the write
+#   still happens, on a different object (find_dsq_for_dispatch,
+#   move_task_between_dsqs, dispatch_to_local_dsq).
+# I3.idle.kfunc_allowed_mask is a draft hypothesis (a missing check).
+#
+# Conventions:
+# - Expressions are in the scope of the function named by evaluated_at /
+#   the site function; in paths, in the step's function.
+# - ops_cpu_valid() (ext.c:1098-1106) = __cpu_valid() (1083-1086:
+#   0 <= cpu < nr_cpu_ids && cpu_possible(cpu)) or scx_error(). It does not
+#   check that the CPU is online.
+# - on_failure: return = explicit return before the write; error = scx_error()
+#   and the write is skipped by control flow but no return statement (except
+#   I3.dsq_id.vtime_ordering no_mixed_mode, a reporting check whose write still
+#   happens; its basis is documented, and the note says so); fallback
+#   = the write is redirected to the global DSQ; continue = the candidate is
+#   skipped silently and the loop continues.
+kernel_version: "v7.1"
+kernel_commit: 8cd9520d35a6c38db6567e97dd93b1f11f185dc6
+invariants:
+  - id: I3
+    title: "A CPU, task-affinity or DSQ-id argument supplied by the BPF scheduler is checked before the scheduler state it indexes or targets is modified (CPUs: range/possible-checked, not online-checked)"
+    description: >-
+      For sched_ext kfuncs that take a CPU number, a task or a DSQ id and then
+      modify shared scheduler state, directly or along their kernel call paths,
+      the validity check of that argument must dominate the write: CPU range
+      checks (ops_cpu_valid) before per-CPU mask / rq writes, the affinity and
+      migration check (task_can_run_on_remote_rq) before a task is moved to the
+      local DSQ of another CPU, and DSQ-id resolution (find_dsq_for_dispatch,
+      find_user_dsq) before a DSQ is written. Each obligation states the guard,
+      the failure edge (return, scx_error, global-DSQ fallback, skip) and the
+      protected write with exact lines. See I3.md.
+    category: argument_validity
+    rules:
+      - id: I3.cpu_arg.kick_cpu
+        title: "scx_bpf_kick_cpu: the target CPU is range-checked (ops_cpu_valid, early return) before its bit is set in this rq's kick masks"
+        description: >-
+          scx_kick_cpu() uses the BPF-supplied cpu as a bit index into
+          this_rq->scx.cpus_to_kick / cpus_to_kick_if_idle / cpus_to_preempt /
+          cpus_to_wait (cpumask_set_cpu) and, for SCX_KICK_IDLE, as cpu_rq(cpu).
+          ops_cpu_valid() at ext.c:8886 is followed by an explicit return at
+          8887, so every path to the writes at 8919-8926 passes the check. The
+          flag combination SCX_KICK_IDLE | (PREEMPT or WAIT) is reported with
+          scx_error() at 8909-8910 but does not return: the idle-kick write still
+          happens and the PREEMPT/WAIT bits are ignored on that branch.
+        category: argument_validity
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: rq, fields: [scx.cpus_to_kick, scx.cpus_to_kick_if_idle, scx.cpus_to_preempt, scx.cpus_to_wait]}
+        access: write
+        requires:
+          predicates:
+            - expr: "ops_cpu_valid(sch, cpu, NULL)"
+              evaluated_at: {function: scx_kick_cpu, file: kernel/sched/ext.c, line: 8886}
+              checked_by: [scx_kick_cpu, ops_cpu_valid]
+              on_failure: return
+              note: "kfunc-wide: the same check also dominates cpu_rq(cpu) at 8907"
+        obligations:
+          - id: kick_masks
+            access: {struct: rq, fields: [scx.cpus_to_kick, scx.cpus_to_kick_if_idle, scx.cpus_to_preempt, scx.cpus_to_wait], op: atomic, instance: this_rq}
+            sites:
+              - {function: scx_kick_cpu, file: kernel/sched/ext.c, line: 8919, note: "cpumask_set_cpu(cpu, this_rq->scx.cpus_to_kick_if_idle)"}
+              - {function: scx_kick_cpu, file: kernel/sched/ext.c, line: 8921, note: "cpus_to_kick"}
+              - {function: scx_kick_cpu, file: kernel/sched/ext.c, line: 8924, note: "cpus_to_preempt, when flags & SCX_KICK_PREEMPT"}
+              - {function: scx_kick_cpu, file: kernel/sched/ext.c, line: 8926, note: "cpus_to_wait, when flags & SCX_KICK_WAIT"}
+            requires:
+              predicates:
+                - expr: "ops_cpu_valid(sch, cpu, NULL)"
+                  evaluated_at: {function: scx_kick_cpu, file: kernel/sched/ext.c, line: 8886}
+                  checked_by: [ops_cpu_valid]
+                  on_failure: return
+                  note: "guard 8886 -> scx_error() inside ops_cpu_valid (1103) -> explicit return 8887 -> writes 8919/8921/8924/8926. The guard dominates every write: the only other exit before them is goto out at 8899 / 8915."
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8886, end_line: 8887, symbol: scx_kick_cpu}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1098, end_line: 1106, symbol: ops_cpu_valid, note: "__cpu_valid() or scx_error()"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1094, end_line: 1096, symbol: ops_cpu_valid, note: "@cpu came from the BPF scheduler and can be any value"}
+            paths:
+              - root: scx_bpf_kick_cpu
+                steps:
+                  - {function: scx_bpf_kick_cpu, file: kernel/sched/ext.c, line: 8952, call: "scx_kick_cpu(sch, cpu, flags)", held: [], note: "only rcu (guard(rcu) 8949); sch != NULL checked at 8951"}
+                  - {function: scx_kick_cpu, file: kernel/sched/ext.c, line: 8886, call: "ops_cpu_valid(sch, cpu, NULL)", held: [], note: "guard; return at 8887 on failure"}
+                  - {function: scx_kick_cpu, file: kernel/sched/ext.c, line: 8921, held: [], note: "irqs disabled since 8889 (local_irq_save); this_rq is per-CPU, so no rq lock is needed for the mask write"}
+            note: "The cpumask ops are atomic set_bit(); the masks are consumed by kick_cpus_irq_workfn() on this CPU."
+        applies_to: [scx_bpf_kick_cpu]
+        enforcement:
+          expected: runtime
+          mechanisms: [guard, scx_error]
+          sites:
+            - {file: kernel/sched/ext.c, line: 8886, end_line: 8887, symbol: scx_kick_cpu}
+            - {file: kernel/sched/ext.c, line: 8909, end_line: 8910, symbol: scx_kick_cpu, note: "flag misuse: scx_error without return"}
+        references:
+          - {file: kernel/sched/ext.c, line: 8881, end_line: 8932, symbol: scx_kick_cpu}
+          - {file: kernel/sched/ext.c, line: 8945, end_line: 8953, symbol: scx_bpf_kick_cpu}
+          - {file: kernel/sched/ext.c, line: 1083, end_line: 1106, symbol: ops_cpu_valid}
+          - {file: kernel/sched/sched.h, line: 806, end_line: 809, symbol: scx_rq, note: "kick cpumasks"}
+        notes: "Worked example of I3 (I3.md). ops_cpu_valid() accepts possible but offline CPUs; kicking one only sets a bit (gap listed in I3.md)."
+
+      - id: I3.cpu_arg.cpuperf_set
+        title: "scx_bpf_cpuperf_set: the target CPU is range-checked before cpu_rq(cpu)->scx.cpuperf_target is written; the write is inside the guard's then-branch"
+        description: >-
+          scx_bpf_cpuperf_set() first rejects perf > SCX_CPUPERF_ONE with
+          scx_error and an explicit return (9431-9434, a value-range check, I4),
+          then evaluates ops_cpu_valid(sch, cpu, NULL) at 9436. There is no early
+          return: rq = cpu_rq(cpu) (9437) and the write at 9458 are both inside
+          the `if (ops_cpu_valid(...)) { ... }` block, so the false edge (after
+          scx_error inside ops_cpu_valid) skips to the end of the function. The
+          ABBA check (9444-9446) and the rq lock are I1.rq_scx.rq_lock.
+        category: argument_validity
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: rq, fields: [scx.cpuperf_target]}
+        access: write
+        requires:
+          predicates:
+            - expr: "ops_cpu_valid(sch, cpu, NULL)"
+              evaluated_at: {function: scx_bpf_cpuperf_set, file: kernel/sched/ext.c, line: 9436}
+              checked_by: [ops_cpu_valid]
+              on_failure: error
+        obligations:
+          - id: cpuperf_target
+            access: {struct: rq, fields: [scx.cpuperf_target], op: write, instance: rq}
+            sites:
+              - {function: scx_bpf_cpuperf_set, file: kernel/sched/ext.c, line: 9458, note: "rq = cpu_rq(cpu) at 9437"}
+            requires:
+              predicates:
+                - expr: "ops_cpu_valid(sch, cpu, NULL)"
+                  evaluated_at: {function: scx_bpf_cpuperf_set, file: kernel/sched/ext.c, line: 9436}
+                  checked_by: [ops_cpu_valid]
+                  on_failure: error
+                  note: "branch dominance, no return: guard 9436 opens the block that contains cpu_rq(cpu) 9437 and the write 9458; false edge = scx_error() in ops_cpu_valid (1103), then the block is skipped and the function ends (9464). A guard analysis must treat 'write inside the then-branch' as dominated."
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 9436, end_line: 9437, symbol: scx_bpf_cpuperf_set}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1098, end_line: 1106, symbol: ops_cpu_valid}
+            paths:
+              - root: scx_bpf_cpuperf_set
+                steps:
+                  - {function: scx_bpf_cpuperf_set, file: kernel/sched/ext.c, line: 9436, call: "ops_cpu_valid(sch, cpu, NULL)", held: []}
+                  - {function: scx_bpf_cpuperf_set, file: kernel/sched/ext.c, line: 9458, held: [{lock: rq, instance: rq}], note: "rq taken at 9454 or already the caller's locked rq (9444)"}
+        applies_to: [scx_bpf_cpuperf_set]
+        enforcement:
+          expected: runtime
+          mechanisms: [guard, scx_error]
+          sites:
+            - {file: kernel/sched/ext.c, line: 9436, symbol: scx_bpf_cpuperf_set}
+            - {file: kernel/sched/ext.c, line: 9431, end_line: 9434, symbol: scx_bpf_cpuperf_set, note: "perf range check, return"}
+        references:
+          - {file: kernel/sched/ext.c, line: 9421, end_line: 9464, symbol: scx_bpf_cpuperf_set}
+        notes: "Read-only siblings scx_bpf_cpuperf_cap/cur (9372, 9400), scx_bpf_cpu_rq (9549) and scx_bpf_cpu_curr (9606) use the same check before indexing per-CPU data; they write nothing and are not obligations here."
+
+      - id: I3.idle.cpu_arg
+        title: "Idle-mask kfuncs: built-in idle tracking and the CPU argument are checked before a CPU's bit is cleared from the idle masks"
+        description: >-
+          scx_bpf_test_and_clear_cpu_idle() returns false unless built-in idle
+          tracking is enabled (1272-1273) and ops_cpu_valid(cpu) holds
+          (1275-1276), then clears the CPU from the idle cpu / smt masks in
+          scx_idle_test_and_clear_cpu() (ext_idle.c:88-109). The select_cpu
+          kfuncs (scx_bpf_select_cpu_dfl, __scx_bpf_select_cpu_and,
+          scx_bpf_select_cpu_and) reach the same writer through
+          select_cpu_from_kfunc(), which validates prev_cpu (920-921, return
+          -EINVAL) and the idle-tracking switch (923-924, return -EBUSY) first.
+          scx_bpf_pick_idle_cpu*() take no CPU argument: the cleared CPU comes
+          from cpumask_any_and_distribute() and is < nr_cpu_ids by construction
+          (ext_idle.c:124-131).
+        category: argument_validity
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: scx_idle_cpus, fields: [cpu, smt]}
+        access: write
+        requires:
+          predicates:
+            - expr: "ops_cpu_valid(sch, cpu, NULL)"
+              checked_by: [ops_cpu_valid]
+              on_failure: return
+        obligations:
+          - id: test_and_clear
+            access: {struct: scx_idle_cpus, fields: [cpu, smt], op: atomic, instance: "idle_cpumask(node)"}
+            sites:
+              - {function: scx_idle_test_and_clear_cpu, file: kernel/sched/ext_idle.c, line: 102, end_line: 109, note: "cpumask_andnot / __cpumask_clear_cpu on smt (103/105), cpumask_test_and_clear_cpu on cpu (109)"}
+            requires:
+              predicates:
+                - expr: "ops_cpu_valid(sch, cpu, NULL)"
+                  evaluated_at: {function: scx_bpf_test_and_clear_cpu_idle, file: kernel/sched/ext_idle.c, line: 1275}
+                  checked_by: [scx_bpf_test_and_clear_cpu_idle, ops_cpu_valid]
+                  on_failure: return
+                  note: "guard 1275 -> return false 1276 -> call 1278 -> writes 103-109"
+                - expr: "check_builtin_idle_enabled(sch)"
+                  evaluated_at: {function: scx_bpf_test_and_clear_cpu_idle, file: kernel/sched/ext_idle.c, line: 1272}
+                  checked_by: [check_builtin_idle_enabled]
+                  on_failure: return
+                  note: "scx_error('built-in idle tracking is disabled') 875, return false 1273"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext_idle.c, line: 1272, end_line: 1276, symbol: scx_bpf_test_and_clear_cpu_idle}
+            paths:
+              - root: scx_bpf_test_and_clear_cpu_idle
+                steps:
+                  - {function: scx_bpf_test_and_clear_cpu_idle, file: kernel/sched/ext_idle.c, line: 1278, call: "scx_idle_test_and_clear_cpu(cpu)", held: []}
+                  - {function: scx_idle_test_and_clear_cpu, file: kernel/sched/ext_idle.c, line: 109, held: []}
+          - id: select_cpu_prev
+            access: {struct: scx_idle_cpus, fields: [cpu, smt], op: atomic, instance: "idle_cpumask(node)"}
+            sites:
+              - {function: scx_idle_test_and_clear_cpu, file: kernel/sched/ext_idle.c, line: 102, end_line: 109}
+            requires:
+              predicates:
+                - expr: "ops_cpu_valid(sch, prev_cpu, NULL)"
+                  evaluated_at: {function: select_cpu_from_kfunc, file: kernel/sched/ext_idle.c, line: 920}
+                  checked_by: [select_cpu_from_kfunc, ops_cpu_valid]
+                  on_failure: return
+                  note: "guard 920 -> return -EINVAL 921 -> scx_idle_test_and_clear_cpu(prev_cpu) at 960 or via scx_select_cpu_dfl (961)"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext_idle.c, line: 920, end_line: 924, symbol: select_cpu_from_kfunc}
+            paths:
+              - root: scx_bpf_select_cpu_dfl
+                steps:
+                  - {function: select_cpu_from_kfunc, file: kernel/sched/ext_idle.c, line: 960, call: "scx_idle_test_and_clear_cpu(prev_cpu)", held: [{lock: pi_lock, instance: p}], note: "per-CPU / migration-disabled branch (958); pi_lock held from select_cpu or taken at 948"}
+                  - {function: scx_idle_test_and_clear_cpu, file: kernel/sched/ext_idle.c, line: 109, held: [{lock: pi_lock, instance: p}]}
+        applies_to: [scx_bpf_test_and_clear_cpu_idle, scx_bpf_select_cpu_dfl, __scx_bpf_select_cpu_and, scx_bpf_select_cpu_and]
+        enforcement:
+          expected: runtime
+          mechanisms: [guard, scx_error]
+          sites:
+            - {file: kernel/sched/ext_idle.c, line: 1272, end_line: 1276, symbol: scx_bpf_test_and_clear_cpu_idle}
+            - {file: kernel/sched/ext_idle.c, line: 920, end_line: 924, symbol: select_cpu_from_kfunc}
+        references:
+          - {file: kernel/sched/ext_idle.c, line: 77, end_line: 110, symbol: scx_idle_test_and_clear_cpu}
+          - {file: kernel/sched/ext_idle.c, line: 912, end_line: 978, symbol: select_cpu_from_kfunc}
+          - {file: kernel/sched/ext_idle.c, line: 1262, end_line: 1279, symbol: scx_bpf_test_and_clear_cpu_idle}
+
+      - id: I3.affinity.remote_local_dsq
+        title: "A task is migrated to another CPU's local DSQ only if task_can_run_on_remote_rq() accepts the destination; otherwise it falls back to the global DSQ"
+        description: >-
+          Moving p to the local DSQ of a CPU other than task_cpu(p) ends in
+          move_remote_task_to_local_dsq(), which does set_task_cpu(p,
+          cpu_of(dst_rq)) (2292) and activate_task(dst_rq) (2305). Every caller
+          first evaluates task_can_run_on_remote_rq(sch, p, dst_rq, enforce)
+          (2328-2375): migration disabled -> false (2348-2352), CPU not in
+          p->cpus_ptr (task_allowed_on_cpu) -> false (2361-2365), dst rq offline
+          -> false (2368-2371). With enforce=true the first two also call
+          scx_error() and the offline case counts SCX_EV_DISPATCH_LOCAL_DSQ_OFFLINE.
+          BPF-directed moves (move_task_between_dsqs from scx_bpf_dsq_move*,
+          dispatch_to_local_dsq from finish_dispatch and the deferred direct
+          dispatches) use enforce=true and redirect to the global DSQ;
+          consume_dispatch_q (scx_bpf_dsq_move_to_local) uses enforce=false and
+          skips the task.
+        category: argument_validity
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: task_struct, fields: [cpu, wake_cpu]}
+          - {struct: scx_dispatch_q, fields: [list, nr]}
+        access: write
+        requires:
+          predicates:
+            - expr: "task_can_run_on_remote_rq(sch, p, dst_rq, enforce)"
+              checked_by: [task_can_run_on_remote_rq]
+              on_failure: fallback
+        obligations:
+          - id: migrate_task
+            access: {struct: task_struct, fields: [cpu, wake_cpu], op: write, instance: p}
+            sites:
+              - {function: move_remote_task_to_local_dsq, file: kernel/sched/ext.c, line: 2292, note: "set_task_cpu(p, cpu_of(dst_rq)); activate_task into dst_rq's local DSQ at 2305"}
+            requires:
+              predicates:
+                - expr: "task_can_run_on_remote_rq(sch, p, dst_rq, true)"
+                  evaluated_at: {function: move_task_between_dsqs, file: kernel/sched/ext.c, line: 2471}
+                  checked_by: [move_task_between_dsqs, task_can_run_on_remote_rq]
+                  on_failure: fallback
+                  note: "guard 2471-2472 (only if src_rq != dst_rq) -> dst_dsq = global, dst_rq = src_rq, SCX_ENQ_GDSQ_FALLBACK (2473-2475) -> the remote branch 2495 is not taken, the task goes to the global DSQ via dispatch_enqueue"
+                - expr: "task_can_run_on_remote_rq(sch, p, dst_rq, true)"
+                  evaluated_at: {function: dispatch_to_local_dsq, file: kernel/sched/ext.c, line: 2601}
+                  checked_by: [dispatch_to_local_dsq, task_can_run_on_remote_rq]
+                  on_failure: fallback
+                  note: "guard 2601-2602 -> dispatch_enqueue(global) 2603-2604 + explicit return 2605 -> write via move_remote_task_to_local_dsq at 2644. Valid across the lock switch because DISPATCHING pins task_rq and cpus_allowed (comment 2590-2591) and holding_cpu is re-checked at 2632."
+                - expr: "task_can_run_on_remote_rq(sch, p, rq, false)"
+                  evaluated_at: {function: consume_dispatch_q, file: kernel/sched/ext.c, line: 2548}
+                  checked_by: [consume_dispatch_q, task_can_run_on_remote_rq]
+                  on_failure: continue
+                  note: "guard 2548 -> false: next task of the DSQ, no error -> true: consume_remote_task 2549 -> move_remote_task_to_local_dsq 2433"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 2348, end_line: 2374, symbol: task_can_run_on_remote_rq}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 2471, end_line: 2476, symbol: move_task_between_dsqs}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 2601, end_line: 2605, symbol: dispatch_to_local_dsq}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 2548, end_line: 2552, symbol: consume_dispatch_q}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2310, end_line: 2327, symbol: task_can_run_on_remote_rq, note: "BPF scheduler must not migrate a migration-disabled task; allowed-mask violations are errors, offline is not"}
+            paths:
+              - root: scx_bpf_dsq_move
+                steps:
+                  - {function: scx_dsq_move, file: kernel/sched/ext.c, line: 8423, call: "move_task_between_dsqs(sch, p, enq_flags, src_dsq, dst_dsq)", held: [{lock: rq, instance: src_rq}, {lock: dsq, instance: src_dsq}], note: "dst_dsq from find_dsq_for_dispatch at 8410 (I3.dsq_id.dispatch_target)"}
+                  - {function: move_task_between_dsqs, file: kernel/sched/ext.c, line: 2495, call: "move_remote_task_to_local_dsq(p, enq_flags, src_rq, dst_rq)", held: [{lock: rq, instance: src_rq}], note: "reached only if the guard at 2471 passed; src_dsq unlocked at 2494"}
+                  - {function: move_remote_task_to_local_dsq, file: kernel/sched/ext.c, line: 2292, held: [{lock: rq, instance: src_rq}]}
+              - root: scx_bpf_dsq_move_to_local___v2
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8538, call: "consume_dispatch_q(sch, dspc->rq, dsq, enq_flags)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: consume_dispatch_q, file: kernel/sched/ext.c, line: 2549, call: "consume_remote_task(rq, p, enq_flags, dsq, task_rq)", held: [{lock: rq, instance: rq}, {lock: dsq, instance: dsq}], note: "after the guard at 2548"}
+                  - {function: consume_remote_task, file: kernel/sched/ext.c, line: 2433, call: "move_remote_task_to_local_dsq(p, enq_flags, src_rq, this_rq)", held: [{lock: rq, instance: src_rq}]}
+                  - {function: move_remote_task_to_local_dsq, file: kernel/sched/ext.c, line: 2292, held: [{lock: rq, instance: src_rq}]}
+              - root: scx_bpf_dsq_move_to_local___v2
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8530, call: "flush_dispatch_buf(sch, dspc->rq)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: flush_dispatch_buf, file: kernel/sched/ext.c, line: 2757, call: "finish_dispatch(sch, rq, ent->task, ent->qseq, ent->dsq_id, ent->enq_flags)", held: [{lock: rq, instance: rq}]}
+                  - {function: finish_dispatch, file: kernel/sched/ext.c, line: 2744, call: "dispatch_to_local_dsq(sch, rq, dsq, p, enq_flags)", held: [{lock: rq, instance: rq}]}
+                  - {function: dispatch_to_local_dsq, file: kernel/sched/ext.c, line: 2644, call: "move_remote_task_to_local_dsq(p, enq_flags, src_rq, dst_rq)", held: [{lock: rq, instance: src_rq}], note: "after the guard at 2601"}
+                  - {function: move_remote_task_to_local_dsq, file: kernel/sched/ext.c, line: 2292, held: [{lock: rq, instance: src_rq}]}
+        applies_to: [scx_bpf_dsq_move, scx_bpf_dsq_move_vtime, scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2]
+        enforcement:
+          expected: runtime
+          mechanisms: [guard, scx_error, warn]
+          sites:
+            - {file: kernel/sched/ext.c, line: 2348, end_line: 2371, symbol: task_can_run_on_remote_rq}
+            - {file: kernel/sched/ext.c, line: 2334, symbol: task_can_run_on_remote_rq, note: "WARN_ON_ONCE(task_cpu(p) == cpu): callers must only ask for remote CPUs"}
+        references:
+          - {file: kernel/sched/ext.c, line: 2310, end_line: 2375, symbol: task_can_run_on_remote_rq}
+          - {file: kernel/sched/ext.c, line: 2281, end_line: 2307, symbol: move_remote_task_to_local_dsq}
+          - {file: kernel/sched/ext.c, line: 2458, end_line: 2510, symbol: move_task_between_dsqs}
+          - {file: kernel/sched/ext.c, line: 2581, end_line: 2660, symbol: dispatch_to_local_dsq}
+          - {file: kernel/sched/ext.c, line: 3965, end_line: 3992, symbol: process_ddsp_deferred_locals, note: "direct dispatches to a remote local DSQ (deferred at 1834-1860) also go through dispatch_to_local_dsq (3990)"}
+        notes: "scx_bpf_dsq_insert* are not in applies_to: their move happens later in the core (finish_dispatch / process_ddsp_deferred_locals), outside the kfunc's own call path. The check sits in the shared helpers, so it covers those core paths too."
+
+      - id: I3.dsq_id.dispatch_target
+        title: "A BPF-supplied DSQ id is resolved and checked (LOCAL_ON cpu range/possible-checked, user DSQ existence) before a task is enqueued on the resulting DSQ"
+        description: >-
+          find_dsq_for_dispatch() (1735-1764) decodes the id: SCX_DSQ_LOCAL ->
+          rq's local DSQ; SCX_DSQ_LOCAL_ON | cpu -> ops_cpu_valid(cpu) (1747),
+          and on failure scx_error plus the global DSQ (1748); SCX_DSQ_GLOBAL ->
+          global; anything else -> find_user_dsq(), and a missing DSQ (including
+          other built-in ids such as SCX_DSQ_INVALID / SCX_DSQ_BYPASS, which are
+          not in dsq_hash) -> scx_error plus the global DSQ (1758-1760). The
+          returned DSQ is what dispatch_enqueue / dispatch_to_local_dsq /
+          move_task_between_dsqs write. scx_bpf_dsq_insert*() do not validate the
+          id when called; only the IMMED flag is vetted against it (8082-8096),
+          so a bad id surfaces asynchronously. scx_bpf_dsq_move_to_local*() only
+          accept user DSQs: find_user_dsq() failure is scx_error plus return
+          false (8532-8535).
+        category: argument_validity
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: scx_dispatch_q, fields: [list, priq, nr, seq]}
+        access: write
+        requires:
+          predicates:
+            - expr: "ops_cpu_valid(sch, dsq_id & SCX_DSQ_LOCAL_CPU_MASK, \"in SCX_DSQ_LOCAL_ON dispatch verdict\")"
+              evaluated_at: {function: find_dsq_for_dispatch, file: kernel/sched/ext.c, line: 1747}
+              checked_by: [find_dsq_for_dispatch, ops_cpu_valid]
+              on_failure: fallback
+        obligations:
+          - id: local_on_cpu
+            access: {struct: scx_dispatch_q, fields: [list, nr, seq], op: write, instance: dsq}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1593, end_line: 1613}
+            when: "(dsq_id & SCX_DSQ_LOCAL_ON) == SCX_DSQ_LOCAL_ON"
+            requires:
+              predicates:
+                - expr: "ops_cpu_valid(sch, cpu, \"in SCX_DSQ_LOCAL_ON dispatch verdict\")"
+                  captures:
+                    - {var: cpu, expr: "dsq_id & SCX_DSQ_LOCAL_CPU_MASK", function: find_dsq_for_dispatch, file: kernel/sched/ext.c, line: 1745}
+                  evaluated_at: {function: find_dsq_for_dispatch, file: kernel/sched/ext.c, line: 1747}
+                  checked_by: [find_dsq_for_dispatch, ops_cpu_valid]
+                  on_failure: fallback
+                  note: "guard 1747 -> scx_error + return find_global_dsq() 1748 -> cpu_rq(cpu) only at 1750. The write then lands on the global DSQ instead."
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1744, end_line: 1750, symbol: find_dsq_for_dispatch}
+            note: "Resolution sites: scx_dsq_move 8410 (scx_bpf_dsq_move*), finish_dispatch 2741, direct_dispatch 1823, process_ddsp_deferred_locals 3988, scx_bpf_dsq_reenq 9179. A remote LOCAL_ON target is then written through dispatch_to_local_dsq / move_task_between_dsqs (I3.affinity.remote_local_dsq)."
+          - id: user_dsq_exists
+            access: {struct: scx_dispatch_q, fields: [list, priq, nr, seq], op: write, instance: dsq}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1568, end_line: 1613}
+            when: "dsq_id != SCX_DSQ_LOCAL && (dsq_id & SCX_DSQ_LOCAL_ON) != SCX_DSQ_LOCAL_ON && dsq_id != SCX_DSQ_GLOBAL"
+            requires:
+              predicates:
+                - expr: "find_user_dsq(sch, dsq_id) != NULL"
+                  evaluated_at: {function: find_dsq_for_dispatch, file: kernel/sched/ext.c, line: 1758}
+                  checked_by: [find_dsq_for_dispatch]
+                  on_failure: fallback
+                  note: "guard 1758 -> scx_error('non-existent DSQ') 1759 + return find_global_dsq() 1760"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1756, end_line: 1760, symbol: find_dsq_for_dispatch}
+            paths:
+              - root: scx_bpf_dsq_move_to_local___v2
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8530, call: "flush_dispatch_buf(sch, dspc->rq)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: flush_dispatch_buf, file: kernel/sched/ext.c, line: 2757, call: "finish_dispatch(sch, rq, ent->task, ent->qseq, ent->dsq_id, ent->enq_flags)", held: [{lock: rq, instance: rq}]}
+                  - {function: finish_dispatch, file: kernel/sched/ext.c, line: 2746, call: "dispatch_enqueue(sch, rq, dsq, p, enq_flags | SCX_ENQ_CLEAR_OPSS)", held: [{lock: rq, instance: rq}], note: "dsq = find_dsq_for_dispatch(...) at 2741, guard 1758 inside"}
+                  - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1603, held: [{lock: rq, instance: rq}, {lock: dsq, instance: dsq}], note: "dsq->lock taken at 1529"}
+          - id: move_to_local_src
+            access: {struct: scx_dispatch_q, fields: [list, priq, nr], op: write, instance: dsq}
+            sites:
+              - {function: task_unlink_from_dsq, file: kernel/sched/ext.c, line: 1652, end_line: 1664}
+            requires:
+              predicates:
+                - expr: "find_user_dsq(sch, dsq_id) != NULL"
+                  evaluated_at: {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8533}
+                  checked_by: [scx_bpf_dsq_move_to_local___v2]
+                  on_failure: return
+                  note: "guard 8533 -> scx_error 8534 -> return false 8535 -> consume_dispatch_q 8538 -> task_unlink_from_dsq (2542 or via 2415)"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8532, end_line: 8535, symbol: scx_bpf_dsq_move_to_local___v2}
+        applies_to: [scx_bpf_dsq_move, scx_bpf_dsq_move_vtime, scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2, scx_bpf_dsq_reenq]
+        enforcement:
+          expected: runtime
+          mechanisms: [guard, scx_error]
+          sites:
+            - {file: kernel/sched/ext.c, line: 1744, end_line: 1760, symbol: find_dsq_for_dispatch}
+            - {file: kernel/sched/ext.c, line: 8532, end_line: 8535, symbol: scx_bpf_dsq_move_to_local___v2}
+        references:
+          - {file: kernel/sched/ext.c, line: 1735, end_line: 1764, symbol: find_dsq_for_dispatch}
+          - {file: kernel/sched/ext.c, line: 335, end_line: 338, symbol: find_user_dsq}
+          - {file: kernel/sched/ext.c, line: 1823, symbol: direct_dispatch, note: "same resolution for ops.select_cpu/enqueue direct dispatch"}
+          - {file: kernel/sched/ext.c, line: 9179, symbol: scx_bpf_dsq_reenq}
+        notes: "find_dsq_for_dispatch() never returns NULL: every invalid id becomes the global DSQ after scx_error(), so the scheduler is aborted but the task is still enqueued somewhere valid. A LOCAL_ON cpu that is possible but offline passes here and is caught by I3.affinity.remote_local_dsq (offline -> global, event only). scx_bpf_dsq_reenq resolves the id synchronously (9179), but the re-enqueue is asynchronous: schedule_dsq_reenq() (1216, called at 9180) only queues the DSQ for deferred processing, so the dispatch_enqueue sites are not on the kfunc's own call path and a consumer should not expect a direct path from it."
+
+      - id: I3.dsq_id.vtime_ordering
+        title: "Vtime (PRIQ) ordering is only applied to a user DSQ that holds no FIFO-queued tasks, and FIFO inserts are refused on a DSQ that holds PRIQ tasks"
+        description: >-
+          scx_bpf_dsq_insert_vtime() / __scx_bpf_dsq_insert_vtime() and
+          scx_bpf_dsq_move_vtime() tag the insert with the internal flag
+          SCX_ENQ_DSQ_PRIQ (8240, 8652). The DSQ is only known once the id is
+          resolved, so the checks sit in dispatch_enqueue(), which every insert
+          reaches (finish_dispatch 2746, direct_dispatch, move_task_between_dsqs).
+          Built-in DSQs (SCX_DSQ_FLAG_BUILTIN: local, global) are FIFO only:
+          1541-1542 reports "cannot use vtime ordering for built-in DSQs"
+          (1550) and clears SCX_ENQ_DSQ_PRIQ (1551), so the rbtree insert at
+          1568 is skipped and the task is queued FIFO instead. A DSQ is either
+          FIFO or PRIQ: a PRIQ insert into a DSQ whose rbtree is empty but whose
+          list holds a task reports "already had FIFO-enqueued tasks"
+          (1562-1565), and a FIFO insert into a DSQ with a non-empty rbtree
+          reports "already had PRIQ-enqueued tasks" (1588-1590). Neither of the
+          two mixing checks returns or changes the flags: the write still
+          happens and only scx_error() aborts the scheduler. The kfunc comment
+          states both rules (8275-8278).
+        category: argument_validity
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: scx_dispatch_q, fields: [list, priq, nr, seq, first_task]}
+        access: write
+        requires:
+          predicates:
+            - expr: "!((dsq->id & SCX_DSQ_FLAG_BUILTIN) && (enq_flags & SCX_ENQ_DSQ_PRIQ))"
+              evaluated_at: {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1541}
+              checked_by: [dispatch_enqueue]
+              on_failure: error
+        obligations:
+          - id: builtin_fifo_only
+            access: {struct: scx_dispatch_q, fields: [priq], op: write, instance: dsq}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1568, note: "rb_add(&p->scx.dsq_priq, &dsq->priq, ...); vtime-ordered list insert at 1579 / 1582"}
+            when: "enq_flags & SCX_ENQ_DSQ_PRIQ"
+            requires:
+              predicates:
+                - expr: "!(dsq->id & SCX_DSQ_FLAG_BUILTIN)"
+                  evaluated_at: {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1541}
+                  checked_by: [dispatch_enqueue]
+                  on_failure: error
+                  note: "guard 1541-1542 -> scx_error 1550 + enq_flags &= ~SCX_ENQ_DSQ_PRIQ 1551 -> branch 1554 not taken, so the PRIQ write 1568 is skipped by control flow (no return). The task is still queued, FIFO, at 1593 / 1603."
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1541, end_line: 1552, symbol: dispatch_enqueue}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1543, end_line: 1548, symbol: dispatch_enqueue, note: "built-in DSQs always consume FIFO; vtime ordering is disallowed on them"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 8277, end_line: 8278, symbol: __scx_bpf_dsq_insert_vtime}
+          - id: no_mixed_mode
+            access: {struct: scx_dispatch_q, fields: [list, priq, nr, seq, first_task], op: write, instance: dsq}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1567, end_line: 1585, note: "PRIQ insert"}
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1592, end_line: 1606, note: "FIFO insert"}
+            requires:
+              predicates:
+                - expr: "!(RB_EMPTY_ROOT(&dsq->priq) && nldsq_next_task(dsq, NULL, false))"
+                  evaluated_at: {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1562}
+                  checked_by: [dispatch_enqueue]
+                  on_failure: error
+                  note: "PRIQ insert. guard 1562-1563 -> scx_error('already had FIFO-enqueued tasks') 1564, no return, the write 1567-1585 still happens. Only detected while the rbtree is empty, i.e. on the first PRIQ insert (comment 1557-1560)."
+                - expr: "RB_EMPTY_ROOT(&dsq->priq)"
+                  evaluated_at: {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1588}
+                  checked_by: [dispatch_enqueue]
+                  on_failure: error
+                  note: "FIFO insert. guard 1588 -> scx_error('already had PRIQ-enqueued tasks') 1589, no return, the write 1592-1606 still happens."
+            basis: documented
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 8275, end_line: 8277, symbol: __scx_bpf_dsq_insert_vtime, note: "a DSQ is a FIFO or a priority queue at any given time"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1557, end_line: 1560, symbol: dispatch_enqueue}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1587, symbol: dispatch_enqueue}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1562, end_line: 1565, symbol: dispatch_enqueue, note: "scx_error without return"}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1588, end_line: 1590, symbol: dispatch_enqueue, note: "scx_error without return"}
+            note: "Reporting check, not a dominating guard: the scheduler is aborted but this insert is done. basis is documented, not checked, for that reason."
+        applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, scx_bpf_dsq_insert_vtime, __scx_bpf_dsq_insert_vtime, scx_bpf_dsq_move, scx_bpf_dsq_move_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [scx_error]
+          sites:
+            - {file: kernel/sched/ext.c, line: 1541, end_line: 1552, symbol: dispatch_enqueue}
+            - {file: kernel/sched/ext.c, line: 1562, end_line: 1565, symbol: dispatch_enqueue}
+            - {file: kernel/sched/ext.c, line: 1588, end_line: 1590, symbol: dispatch_enqueue}
+        references:
+          - {file: kernel/sched/ext.c, line: 1518, end_line: 1614, symbol: dispatch_enqueue}
+          - {file: kernel/sched/ext.c, line: 8227, end_line: 8243, symbol: scx_dsq_insert_vtime, note: "commit with enq_flags | SCX_ENQ_DSQ_PRIQ at 8240"}
+          - {file: kernel/sched/ext.c, line: 8647, end_line: 8653, symbol: scx_bpf_dsq_move_vtime}
+          - {file: kernel/sched/ext.c, line: 2741, end_line: 2746, symbol: finish_dispatch}
+        notes: "For scx_bpf_dsq_insert*, the check runs later in the core (finish_dispatch / direct_dispatch), not on the kfunc's own call path, as for I3.dsq_id.dispatch_target. The error names the DSQ id (0x%016llx)."
+
+      - id: I3.enq_flags.dsq_insert
+        title: "scx_bpf_dsq_insert*: enq_flags are checked (no kernel-internal bits; SCX_ENQ_IMMED only for a local DSQ) before the insert is recorded"
+        description: >-
+          scx_dsq_insert_preamble() (8099-8124) runs before every insert kfunc
+          records anything: scx_bpf_dsq_insert___v2 (8204) and
+          scx_dsq_insert_vtime (8230, reached from scx_bpf_dsq_insert_vtime and
+          __scx_bpf_dsq_insert_vtime). It rejects any bit of
+          __SCX_ENQ_INTERNAL_MASK (bits 56-63, ext_internal.h:1146; e.g.
+          SCX_ENQ_CLEAR_OPSS, SCX_ENQ_DSQ_PRIQ) with scx_error("invalid
+          enq_flags 0x%llx") and return false (8109-8111), then calls
+          scx_vet_enq_flags() (8120), which rejects SCX_ENQ_IMMED for a DSQ id
+          other than SCX_DSQ_LOCAL / SCX_DSQ_LOCAL_ON with scx_error("SCX_ENQ_IMMED
+          on a non-local DSQ 0x%llx") and return false (8087-8090). On failure
+          the kfunc returns before p->scx.slice (8208), p->scx.dsq_vtime (8238)
+          and the insert record (scx_dsq_insert_commit: direct-dispatch fields
+          via mark_direct_dispatch, or the dispatch buffer entry 8143) are
+          written. scx_dsq_move (scx_bpf_dsq_move*) runs only the IMMED check
+          (8364-8365).
+        category: argument_validity
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: scx_dsp_ctx, fields: [buf, cursor]}
+          - {struct: task_struct, fields: [scx.slice, scx.dsq_vtime, scx.ddsp_dsq_id, scx.ddsp_enq_flags]}
+        access: write
+        requires:
+          predicates:
+            - expr: "!(enq_flags & __SCX_ENQ_INTERNAL_MASK)"
+              evaluated_at: {function: scx_dsq_insert_preamble, file: kernel/sched/ext.c, line: 8109}
+              checked_by: [scx_dsq_insert_preamble]
+              on_failure: return
+        obligations:
+          - id: internal_bits
+            access: {struct: scx_dsp_ctx, fields: [buf, cursor], op: write, instance: "this_cpu_ptr(sch->pcpu)->dsp_ctx"}
+            sites:
+              - {function: scx_dsq_insert_commit, file: kernel/sched/ext.c, line: 8143, end_line: 8148, note: "dispatch buffer entry with dsq_id and enq_flags"}
+              - {function: mark_direct_dispatch, file: kernel/sched/ext.c, line: 1793, end_line: 1794, note: "p->scx.ddsp_dsq_id / ddsp_enq_flags, called from scx_dsq_insert_commit 8134"}
+            requires:
+              predicates:
+                - expr: "!(*enq_flags & __SCX_ENQ_INTERNAL_MASK)"
+                  evaluated_at: {function: scx_dsq_insert_preamble, file: kernel/sched/ext.c, line: 8109}
+                  checked_by: [scx_dsq_insert_preamble]
+                  on_failure: return
+                  note: "guard 8109 -> scx_error('invalid enq_flags') 8110 + return false 8111 -> kfunc returns at 8205 / 8231 -> scx_dsq_insert_commit 8212 / 8240 not reached"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8109, end_line: 8111, symbol: scx_dsq_insert_preamble}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8204, end_line: 8205, symbol: scx_bpf_dsq_insert___v2}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8230, end_line: 8231, symbol: scx_dsq_insert_vtime}
+            paths:
+              - root: scx_bpf_dsq_insert
+                steps:
+                  - {function: scx_bpf_dsq_insert, file: kernel/sched/ext.c, line: 8224, call: "scx_bpf_dsq_insert___v2(p, dsq_id, slice, enq_flags, aux)", held: []}
+                  - {function: scx_bpf_dsq_insert___v2, file: kernel/sched/ext.c, line: 8212, call: "scx_dsq_insert_commit(sch, p, dsq_id, enq_flags)", held: [], note: "after the preamble at 8204"}
+                  - {function: scx_dsq_insert_commit, file: kernel/sched/ext.c, line: 8143, held: []}
+          - id: immed_local_only
+            access: {struct: scx_dsp_ctx, fields: [buf, cursor], op: write, instance: "this_cpu_ptr(sch->pcpu)->dsp_ctx"}
+            sites:
+              - {function: scx_dsq_insert_commit, file: kernel/sched/ext.c, line: 8143, end_line: 8148}
+              - {function: mark_direct_dispatch, file: kernel/sched/ext.c, line: 1793, end_line: 1794}
+            when: "enq_flags & SCX_ENQ_IMMED"
+            requires:
+              predicates:
+                - expr: "dsq_id == SCX_DSQ_LOCAL || (dsq_id & SCX_DSQ_LOCAL_ON) == SCX_DSQ_LOCAL_ON"
+                  evaluated_at: {function: scx_vet_enq_flags, file: kernel/sched/ext.c, line: 8088}
+                  checked_by: [scx_dsq_insert_preamble, scx_vet_enq_flags]
+                  on_failure: return
+                  note: "guard 8087-8088 -> scx_error('SCX_ENQ_IMMED on a non-local DSQ') 8089 + return false 8090 -> preamble returns false 8120-8121 -> kfunc returns at 8205 / 8231"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8084, end_line: 8091, symbol: scx_vet_enq_flags}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8120, end_line: 8121, symbol: scx_dsq_insert_preamble}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8364, end_line: 8365, symbol: scx_dsq_move, note: "same check for scx_bpf_dsq_move*"}
+        applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, scx_bpf_dsq_insert_vtime, __scx_bpf_dsq_insert_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [guard, scx_error]
+          sites:
+            - {file: kernel/sched/ext.c, line: 8109, end_line: 8111, symbol: scx_dsq_insert_preamble}
+            - {file: kernel/sched/ext.c, line: 8087, end_line: 8090, symbol: scx_vet_enq_flags}
+        references:
+          - {file: kernel/sched/ext.c, line: 8082, end_line: 8124, symbol: scx_dsq_insert_preamble}
+          - {file: kernel/sched/ext.c, line: 8126, end_line: 8149, symbol: scx_dsq_insert_commit}
+          - {file: kernel/sched/ext_internal.h, line: 1145, end_line: 1151, symbol: scx_enq_flags, note: "high 8 bits are internal"}
+        notes: "The IMMED check sees the raw id, before resolution: SCX_DSQ_LOCAL_ON with an invalid cpu passes here and is caught by I3.dsq_id.dispatch_target. scx_dsq_move does not test __SCX_ENQ_INTERNAL_MASK (only scx_vet_enq_flags at 8364); untested."
+
+      - id: I3.idle.kfunc_allowed_mask
+        title: "Draft: select_cpu kfuncs may claim prev_cpu's idle bit for a single-CPU task without checking p->cpus_ptr when a BPF cpumask is passed"
+        description: >-
+          Hypothesis, not established by the source. In select_cpu_from_kfunc(),
+          for tasks with nr_cpus_allowed == 1 or BPF-migration-disabled, the
+          only affinity check before scx_idle_test_and_clear_cpu(prev_cpu) is
+          cpumask_test_cpu(prev_cpu, allowed ?: p->cpus_ptr) (ext_idle.c:959).
+          When the BPF scheduler passes its own cpus_allowed
+          (__scx_bpf_select_cpu_and / scx_bpf_select_cpu_and), p->cpus_ptr is
+          not consulted, whereas the general path scx_select_cpu_dfl()
+          intersects the two masks (471-481). A prev_cpu outside the task's
+          affinity can then be removed from the idle mask and returned. The core
+          re-checks the final CPU (is_cpu_allowed in select_task_rq), so the
+          effect is a lost idle bit and a wrong hint, not a misplaced task; it
+          needs a test.
+        category: argument_validity
+        status: draft
+        role: protection
+        objects:
+          - {struct: scx_idle_cpus, fields: [cpu, smt]}
+        access: write
+        requires:
+          predicates:
+            - expr: "cpumask_test_cpu(prev_cpu, p->cpus_ptr)"
+              on_failure: continue
+        obligations:
+          - id: prev_in_task_mask
+            access: {struct: scx_idle_cpus, fields: [cpu, smt], op: atomic, instance: "idle_cpumask(node)"}
+            sites:
+              - {function: select_cpu_from_kfunc, file: kernel/sched/ext_idle.c, line: 959, end_line: 960}
+            when: "allowed != NULL && (p->nr_cpus_allowed == 1 || is_bpf_migration_disabled(p))"
+            requires:
+              predicates:
+                - expr: "cpumask_test_cpu(prev_cpu, p->cpus_ptr)"
+                  evaluated_at: {function: select_cpu_from_kfunc, file: kernel/sched/ext_idle.c, line: 959}
+                  note: "hypothesis: the source tests only `allowed` here"
+            basis: hypothesis
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext_idle.c, line: 953, end_line: 957, symbol: select_cpu_from_kfunc, note: "'simply check whether the previously used CPU is idle and within the allowed cpumask'"}
+        applies_to: [__scx_bpf_select_cpu_and, scx_bpf_select_cpu_and]
+        enforcement:
+          expected: none
+          mechanisms: [none]
+        references:
+          - {file: kernel/sched/ext_idle.c, line: 958, end_line: 963, symbol: select_cpu_from_kfunc}
+          - {file: kernel/sched/ext_idle.c, line: 468, end_line: 481, symbol: scx_select_cpu_dfl, note: "the general path intersects cpus_allowed with p->cpus_ptr"}
+        notes: "Kept as draft so no consumer reports violations from it."
