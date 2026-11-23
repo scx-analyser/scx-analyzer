@@ -19,7 +19,9 @@ Starting point: `contracts/fixtures/catalog.example.yaml`.
 
 Pinned kernel: the tag in `/KERNEL_VERSION` (currently **v7.1**) and its full
 commit SHA in `/KERNEL_COMMIT`. Every line number in `kfuncs.csv` refers to that
-commit. v7.1 matches the course kernel. To change the pin, update both files (`git -C ~/linux rev-parse <tag>^{commit}` gives the SHA),
+commit. v7.1 is the course kernel: the TA asked the team to use the course
+kernel, and v7.1 was confirmed as that kernel on 2026-11-23, so the pin is
+final, not provisional. To change the pin, update both files (`git -C ~/linux rev-parse <tag>^{commit}` gives the SHA),
 check out the new tag and regenerate.
 
 ### Regenerating

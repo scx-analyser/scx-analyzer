@@ -47,7 +47,7 @@ RE_SHA = re.compile(r"^[0-9a-f]{40}$")
 def read_pin_file(path):
     """First non-empty, non-comment line of a pin file, or None if absent."""
     try:
-        for line in Path(path).read_text().splitlines():
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line and not line.startswith("#"):
                 return line
@@ -183,7 +183,7 @@ class CondTracker:
 
 def scan_file(path, rel):
     """Return (entries, definitions) for one source file."""
-    return scan_text(path.read_text(errors="replace"), rel)
+    return scan_text(path.read_text(encoding="utf-8", errors="replace"), rel)
 
 
 def scan_text(text, rel):
