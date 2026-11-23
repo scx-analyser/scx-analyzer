@@ -16,7 +16,8 @@ Besides JSON-Schema validation, catalog files get checks a schema cannot express
   objects [] / access none / no obligations;
 - obligations: unique ids per rule, access names a struct/fields listed in the rule's
   objects, ordering only on atomic accesses, requires present unless an ordered
-  atomic, basis backed by matching evidence, no hypothesis in a source_verified rule.
+  atomic, basis backed by matching evidence, no hypothesis in a source_verified rule,
+  each path's root among the rule's applies_to and its last step a site function.
 The catalog's enforcement-mechanism enum must equal the findings schema's.
 """
 import json
@@ -54,7 +55,7 @@ RUNTIME_MECHS = {"lock", "scx_error", "warn", "guard", "atomic", "kf_mask"}
 # obligation basis -> evidence kinds that can support it
 BASIS_EVIDENCE = {
     "checked": {"lockdep_assert", "runtime_check"},
-    "documented": {"kernel_comment"},
+    "documented": {"kernel_comment", "warn_only"},
     "observed": {"acquired_on_path", "lockdep_assert"},
 }
 
@@ -142,7 +143,10 @@ def obligation_errors(rule: dict, loc: str) -> list[str]:
         kinds = {ev["kind"] for ev in ob["evidence"]}
         if basis in BASIS_EVIDENCE and not kinds & BASIS_EVIDENCE[basis]:
             errs.append(f"{oloc}.basis: {basis!r} needs evidence of kind {sorted(BASIS_EVIDENCE[basis])}, got {sorted(kinds)}")
+        applies = set(rule.get("applies_to", []))
         for p, path in enumerate(ob.get("paths", [])):
+            if "*" not in applies and path["root"] not in applies:
+                errs.append(f"{oloc}.paths[{p}].root: {path['root']!r} is not in the rule's applies_to")
             if path["steps"][-1]["function"] not in {s["function"] for s in ob["sites"]}:
                 errs.append(f"{oloc}.paths[{p}]: last step {path['steps'][-1]['function']!r} is not a site function")
     return errs
@@ -219,8 +223,14 @@ def kernel_version_errors(doc: dict, rel: str) -> list[str]:
 
 
 def cross_contract_errors() -> list[str]:
-    cat = set(SCHEMAS["catalog"]["$defs"]["mechanism"]["enum"])
-    fnd = set(SCHEMAS["findings"]["properties"]["findings"]["items"]["properties"]["enforcement"]["items"]["enum"])
+    try:
+        cat = set(SCHEMAS["catalog"]["$defs"]["mechanism"]["enum"])
+    except (KeyError, TypeError):
+        return ["catalog schema has no $defs.mechanism.enum; update cross_contract_errors()"]
+    try:
+        fnd = set(SCHEMAS["findings"]["properties"]["findings"]["items"]["properties"]["enforcement"]["items"]["enum"])
+    except (KeyError, TypeError):
+        return ["findings schema has no findings[].enforcement enum; update cross_contract_errors()"]
     if cat != fnd:
         return [f"catalog mechanism enum != findings enforcement enum: {sorted(cat ^ fnd)}"]
     return []

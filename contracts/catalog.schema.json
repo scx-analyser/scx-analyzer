@@ -407,8 +407,8 @@
       "additionalProperties": false,
       "properties": {
         "kind": {
-          "enum": ["lockdep_assert", "runtime_check", "acquired_on_path", "kernel_comment"],
-          "description": "lockdep_assert = lockdep_assert_*() of this lock instance; runtime_check = production check (scx_error/WARN/BUG with return) enforcing it; acquired_on_path = the lock is taken on the path before the site; kernel_comment = a kernel comment states the rule."
+          "enum": ["lockdep_assert", "runtime_check", "warn_only", "acquired_on_path", "kernel_comment"],
+          "description": "lockdep_assert = lockdep_assert_*() of this lock instance; runtime_check = production check that stops the access on failure (scx_error/WARN followed by a return, or BUG); warn_only = production WARN that reports a violation but lets the access proceed (detection, not enforcement); acquired_on_path = the lock is taken on the path before the site; kernel_comment = a kernel comment states the rule."
         },
         "file": {"$ref": "#/$defs/path"},
         "line": {"type": "integer", "minimum": 1},
@@ -476,7 +476,7 @@
         },
         "basis": {
           "enum": ["checked", "documented", "observed", "hypothesis"],
-          "description": "Why this is a requirement. checked = the source checks it on every path to the sites (needs lockdep_assert or runtime_check evidence); documented = a kernel comment states it (needs kernel_comment evidence); observed = the lock is acquired or held on every inspected path but the kernel states no rule (needs acquired_on_path or lockdep_assert evidence); hypothesis = proposed, not established by the source (draft rules only)."
+          "description": "Why this is a requirement. checked = the source checks it on every path to the sites (needs lockdep_assert or runtime_check evidence); documented = a kernel comment states it, or a WARN-only check expects it without enforcing it (needs kernel_comment or warn_only evidence); observed = the lock is acquired or held on every inspected path but the kernel states no rule (needs acquired_on_path or lockdep_assert evidence); hypothesis = proposed, not established by the source (draft rules only)."
         },
         "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}},
         "paths": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/call_path"}},

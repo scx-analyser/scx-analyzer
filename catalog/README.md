@@ -83,7 +83,8 @@ obligations:
 * All locks and predicates in one obligation, and all obligations on the same access, are
   conjunctive. A consumer that cannot resolve `when` reports UNKNOWN.
 * `basis` says why it is a requirement and must be backed by `evidence` of a matching kind:
-  `checked` (lockdep_assert / runtime_check on every path), `documented` (kernel_comment),
+  `checked` (lockdep_assert / runtime_check on every path; a runtime_check must stop the access),
+  `documented` (kernel_comment, or a warn_only check that detects a violation but lets it proceed),
   `observed` (acquired_on_path / lockdep_assert, but the kernel states no rule),
   `hypothesis` (draft rules only). Epic C should compile only `checked` / `documented`.
 * `paths[].steps[].held` lists the tracked locks held at that line (instances in that
