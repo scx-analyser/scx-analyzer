@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert_vtime reason="already had"
+ * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert_vtime rule=I3.dsq_id.vtime_ordering reason="already had"
  *
  * One DSQ gets FIFO inserts for odd pids and vtime inserts for even pids. The first insert of the
- * other kind into a non-empty DSQ fails ("already had FIFO-/PRIQ-enqueued tasks").
+ * other kind into a non-empty DSQ is reported ("already had FIFO-/PRIQ-enqueued tasks"); the insert
+ * still happens, the scheduler is aborted.
  */
 #include <scx/common.bpf.h>
 

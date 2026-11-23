@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert_vtime reason="cannot use vtime ordering for built-in DSQs"
+ * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert_vtime rule=I3.dsq_id.vtime_ordering reason="cannot use vtime ordering for built-in DSQs"
  *
  * Built-in DSQs are FIFO only; a vtime insert into SCX_DSQ_GLOBAL is a runtime error.
  */

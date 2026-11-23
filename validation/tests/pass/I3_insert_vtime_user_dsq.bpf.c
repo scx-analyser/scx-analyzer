@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I3 expect=ok kfunc=scx_bpf_dsq_insert_vtime
+ * scxa: invariant=I3 expect=ok kfunc=scx_bpf_dsq_insert_vtime rule=I3.dsq_id.vtime_ordering
  *
  * vtime ordering on a user DSQ that only ever gets vtime inserts.
  */

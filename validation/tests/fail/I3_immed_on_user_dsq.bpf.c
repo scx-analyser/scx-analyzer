@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert reason="SCX_ENQ_IMMED on a non-local DSQ"
+ * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert rule=I3.enq_flags.dsq_insert reason="SCX_ENQ_IMMED on a non-local DSQ"
  *
  * SCX_ENQ_IMMED only makes sense for a local DSQ; on a user DSQ it is rejected.
  * Pass variant: pass/I3_insert_created_dsq.

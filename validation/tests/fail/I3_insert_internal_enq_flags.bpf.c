@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert reason="invalid enq_flags"
+ * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert rule=I3.enq_flags.dsq_insert reason="invalid enq_flags"
  *
  * Bits 56-63 (__SCX_ENQ_INTERNAL_MASK) are kernel-internal; passing one is rejected before the insert.
  * Pass variant: pass/I3_insert_created_dsq (flags passed through unchanged).
