@@ -1,5 +1,6 @@
-# Example invariant catalog: one entry per family (I1, I2, I3), each with one
-# example rule under `rules`, written against
+# Example invariant catalog: one entry per family (I1, I2, I3) with example rules
+# under `rules` (I1: one protection rule with a bound obligation and call path,
+# one supporting entry-state rule), written against
 # Linux v7.1 (commit below). All file:line references were checked against
 # kernel/sched/ext.c at that commit. Real entries live in catalog/invariants/*.yaml
 # (tasks A3-A5); this file documents the contract by example.
@@ -16,31 +17,72 @@ kernel_commit: 8cd9520d35a6c38db6567e97dd93b1f11f185dc6
 illustrative: true
 invariants:
   - id: I1
-    title: "sched_ext kfuncs are called only from the contexts, and with the locks, their kfunc sets allow"
+    title: "Protected scheduler-state writes made by sched_ext kfuncs hold the lock that protects them"
     description: >-
-      Calling-context and locking requirements of sched_ext kfuncs; example
-      rule taken from catalog/invariants/I1.yaml.
+      Locking requirements for shared sched_ext state written along kfunc call
+      paths; one protection rule and one supporting entry-state rule taken from
+      catalog/invariants/I1.yaml.
     category: context_locking
     rules:
-      - id: I1.dsq_insert.context
-        title: "DSQ-insert kfuncs are callable only from ops.select_cpu, ops.enqueue and ops.dispatch"
+      - id: I1.local_dsq.rq_lock
+        title: "A local DSQ and the task's link into it are written with the owning rq lock held"
         description: >-
-          scx_bpf_dsq_insert() and its variants are members of the
-          scx_kfunc_ids_enqueue_dispatch BTF set, registered for STRUCT_OPS programs
-          only. The set's .filter, scx_kfunc_context_filter(), consults
-          scx_kf_allow_flags[]: only select_cpu and enqueue (SCX_KF_ALLOW_ENQUEUE |
-          SCX_KF_ALLOW_SELECT_CPU) and dispatch (SCX_KF_ALLOW_ENQUEUE |
-          SCX_KF_ALLOW_DISPATCH) grant this set, so a call from any other callback,
-          from a non-SCX struct_ops or from a SYSCALL/TRACING program is rejected at
-          load time (-EACCES). At run time a call from ops.select_cpu/ops.enqueue
-          must name the task being enqueued (mark_direct_dispatch()) and a call from
-          ops.dispatch must fit in the dispatch buffer; both failures scx_error().
-          The preamble also asserts that IRQs are disabled, but only under lockdep,
-          so that does not count as runtime enforcement. The kfunc itself imposes no
-          rq-lock requirement (see its kernel-doc), although ops.enqueue and
-          ops.dispatch are entered with the rq lock held.
+          Local DSQs are protected by their rq's lock (ext.c:2574-2576).
+          move_local_task_to_local_dsq() appends the task to dst_rq's local DSQ and
+          bumps its nr; it asserts both the source DSQ lock and dst_rq's lock.
         category: context_locking
         status: source_verified
+        role: protection
+        objects:
+          - {struct: scx_dispatch_q, fields: [list, nr]}
+          - {struct: task_struct, fields: [scx.dsq_list.node, scx.dsq]}
+        access: write
+        requires:
+          locks:
+            - {lock: bpf_spin_lock, state: not_held, where: access_site, note: "kfunc-wide context condition, not field protection"}
+        obligations:
+          - id: dst_local_dsq
+            access: {struct: scx_dispatch_q, fields: [list, nr], op: write, instance: dst_dsq}
+            sites:
+              - {function: move_local_task_to_local_dsq, file: kernel/sched/ext.c, line: 2261, end_line: 2266}
+            requires:
+              locks:
+                - {lock: rq, instance: dst_rq, state: held}
+            basis: checked
+            evidence:
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 2257, symbol: move_local_task_to_local_dsq}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2574, end_line: 2576, symbol: dispatch_to_local_dsq, note: "local DSQs are protected with rq locks"}
+            paths:
+              - root: scx_bpf_dsq_move_to_local___v2
+                entry:
+                  - {function: balance_one, file: kernel/sched/ext.c, line: 2890, note: "lockdep_assert_rq_held(rq)"}
+                  - {function: scx_dispatch_sched, file: kernel/sched/ext.c, line: 2844, note: "SCX_CALL_OP(sch, dispatch, rq, ...)"}
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8538, call: "consume_dispatch_q(sch, dspc->rq, dsq, enq_flags)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: consume_dispatch_q, file: kernel/sched/ext.c, line: 2543, call: "move_local_task_to_local_dsq(sch, p, enq_flags, dsq, rq)", held: [{lock: rq, instance: rq}, {lock: dsq, instance: dsq}]}
+                  - {function: move_local_task_to_local_dsq, file: kernel/sched/ext.c, line: 2266, held: [{lock: rq, instance: dst_rq}, {lock: dsq, instance: src_dsq}]}
+        applies_to: [scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2]
+        enforcement:
+          expected: runtime
+          mechanisms: [lock, lockdep]
+          sites:
+            - {file: kernel/sched/ext.c, line: 2525, symbol: consume_dispatch_q, note: "raw_spin_lock(&dsq->lock); rq already held by balance_one()"}
+            - {file: kernel/sched/ext.c, line: 2256, end_line: 2257, symbol: move_local_task_to_local_dsq, note: "lockdep (CONFIG_LOCKDEP only)"}
+        references:
+          - {file: kernel/sched/ext.c, line: 2248, end_line: 2270, symbol: move_local_task_to_local_dsq}
+
+      - id: I1.dsq_insert.context
+        title: "Entry state: DSQ-insert kfuncs are callable only from ops.select_cpu, ops.enqueue and ops.dispatch"
+        description: >-
+          Supporting entry-state facts, not a field-protection rule.
+          scx_bpf_dsq_insert() and its variants are members of the
+          scx_kfunc_ids_enqueue_dispatch BTF set, registered for STRUCT_OPS programs
+          only; the set's .filter, scx_kfunc_context_filter(), admits only
+          select_cpu, enqueue and dispatch. ops.enqueue and ops.dispatch are entered
+          with the rq lock held.
+        category: context_locking
+        status: source_verified
+        role: entry_state
         objects: []
         access: none
         requires:
@@ -49,29 +91,21 @@ invariants:
             callbacks: [ops.select_cpu, ops.enqueue, ops.dispatch]
             program_types: [BPF_PROG_TYPE_STRUCT_OPS]
           locks:
-            - lock: irqs_disabled
-              state: held
-              where: access_site
-              note: "lockdep_assert_irqs_disabled() in scx_dsq_insert_preamble()"
             - lock: rq
               state: held
               where: callback_entry
               callbacks: [ops.enqueue, ops.dispatch]
-              note: "SCX_CALL_OP*(..., rq, ...) -> update_locked_rq() asserts the rq lock; ops.select_cpu entry lock state is not recorded here"
+              note: "SCX_CALL_OP*(..., rq, ...) -> update_locked_rq() asserts the rq lock"
         applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, __scx_bpf_dsq_insert_vtime, scx_bpf_dsq_insert_vtime]
         enforcement:
-          expected: static+runtime
-          mechanisms: [kfunc_set, verifier, scx_error, lockdep]
+          expected: static
+          mechanisms: [kfunc_set, verifier]
           sites:
             - {file: kernel/sched/ext.c, line: 8331, end_line: 8336, symbol: scx_kfunc_ids_enqueue_dispatch, note: "BTF set membership"}
             - {file: kernel/sched/ext.c, line: 9936, end_line: 9937, symbol: scx_init, note: "registered for BPF_PROG_TYPE_STRUCT_OPS only"}
             - {file: kernel/sched/ext.c, line: 9860, end_line: 9917, symbol: scx_kfunc_context_filter, note: "verifier-time per-op filter, -EACCES otherwise"}
-            - {file: kernel/sched/ext.c, line: 1779, end_line: 1787, symbol: mark_direct_dispatch, note: "scx_error unless @p is the task being enqueued"}
-            - {file: kernel/sched/ext.c, line: 8138, end_line: 8140, symbol: scx_dsq_insert_commit, note: "scx_error 'dispatch buffer overflow'"}
-            - {file: kernel/sched/ext.c, line: 8102, symbol: scx_dsq_insert_preamble, note: "lockdep_assert_irqs_disabled() (CONFIG_LOCKDEP only)"}
         references:
           - {file: kernel/sched/ext.c, line: 9828, end_line: 9850, symbol: scx_kf_allow_flags, note: "select_cpu/enqueue/dispatch grant SCX_KF_ALLOW_ENQUEUE"}
-          - {file: kernel/sched/ext.c, line: 8162, end_line: 8163, symbol: scx_bpf_dsq_insert, note: "kernel-doc: can be called from ops.enqueue(), ops.select_cpu(), ops.dispatch()"}
           - {file: kernel/sched/ext.c, line: 458, end_line: 468, symbol: update_locked_rq}
         notes: "v7.1 has no runtime kf_mask / scx_kf_allowed(); context checking is verifier-time only."
 
