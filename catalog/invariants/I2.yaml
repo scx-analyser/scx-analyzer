@@ -72,10 +72,10 @@ invariants:
                   checked_by: [dispatch_enqueue]
                   on_failure: continue
                   note: "WARN_ON_ONCE only; the enqueue proceeds and would corrupt the list. move_local_task_to_local_dsq() checks only holding_cpu < 0 (2259); its callers unlinked p from src_dsq just before (2542, 2489)."
-            basis: checked
+            basis: documented
             evidence:
-              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1524, end_line: 1526, symbol: dispatch_enqueue, note: "WARN_ON_ONCE(p->scx.dsq || !list_empty(...)); WARN_ON_ONCE(ON_PRIQ || !RB_EMPTY_NODE(...))"}
-              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1858, symbol: direct_dispatch, note: "same WARN before linking into ddsp_deferred_locals"}
+              - {kind: warn_only, file: kernel/sched/ext.c, line: 1524, end_line: 1526, symbol: dispatch_enqueue, note: "WARN_ON_ONCE(p->scx.dsq || !list_empty(...)); WARN_ON_ONCE(ON_PRIQ || !RB_EMPTY_NODE(...))"}
+              - {kind: warn_only, file: kernel/sched/ext.c, line: 1858, symbol: direct_dispatch, note: "same WARN before linking into ddsp_deferred_locals"}
           - id: nr_with_list
             access: {struct: scx_dispatch_q, fields: [list, priq, nr], op: write, instance: dsq}
             sites:
@@ -161,9 +161,9 @@ invariants:
                   checked_by: [do_enqueue_task]
                   on_failure: continue
                   note: "WARN_ON_ONCE only; the store at 1942 happens anyway"
-            basis: checked
+            basis: documented
             evidence:
-              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1941, symbol: do_enqueue_task}
+              - {kind: warn_only, file: kernel/sched/ext.c, line: 1941, symbol: do_enqueue_task, note: "WARN_ON_ONCE unless NONE; the store at 1942 happens anyway"}
               - {kind: kernel_comment, file: kernel/sched/ext_internal.h, line: 1276, end_line: 1280, note: "rq lock held during QUEUEING"}
               - {kind: runtime_check, file: kernel/sched/ext.c, line: 2088, end_line: 2093, symbol: ops_dequeue, note: "BUG() if a dequeue under the rq lock sees QUEUEING"}
           - id: claim_qseq
@@ -264,7 +264,7 @@ invariants:
           - {file: kernel/sched/ext_internal.h, line: 1239, end_line: 1364, note: "ownership state machine, ordering rules, QSEQ layout"}
           - {file: kernel/sched/ext.c, line: 2681, end_line: 2747, symbol: finish_dispatch}
           - {file: kernel/sched/ext.c, line: 2073, end_line: 2130, symbol: ops_dequeue}
-        notes: "direct_dispatch() 1851-1855 resets an unexpected QUEUED/DISPATCHING to NONE after a WARN, an edge outside the table; treated as error recovery, not a legal transition. ops_dequeue BUGs (2093, 2128) are the only hard stops."
+        notes: "Overlap with I1: queueing_entry, exit_release and claim_qseq / dequeue_claim are at the same sites as I1.ops_state.atomic (queueing_entry, exit_release, claim_cmpxchg). I1 owns the lock and memory-ordering requirement of those atomics; the I2 obligations add the ownership predicates (expected state, QSEQ). A checker should report a site's lock/ordering violation once, under I1, and use I2 only for the state predicates. direct_dispatch() 1851-1855 resets an unexpected QUEUED/DISPATCHING to NONE after a WARN, an edge outside the table; treated as error recovery, not a legal transition. ops_dequeue BUGs (2093, 2128) are the only hard stops."
 
       - id: I2.holding_cpu.handoff
         title: "A CPU that moves a task between rqs owns it through p->scx.holding_cpu and re-validates the claim after switching rq locks"
@@ -304,7 +304,7 @@ invariants:
             basis: checked
             evidence:
               - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 2412, symbol: unlink_dsq_and_lock_src_rq}
-              - {kind: runtime_check, file: kernel/sched/ext.c, line: 2414, symbol: unlink_dsq_and_lock_src_rq}
+              - {kind: warn_only, file: kernel/sched/ext.c, line: 2414, symbol: unlink_dsq_and_lock_src_rq, note: "WARN_ON_ONCE(holding_cpu >= 0); the claim proceeds"}
               - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2395, end_line: 2405, symbol: unlink_dsq_and_lock_src_rq}
             paths:
               - root: scx_bpf_dsq_move_to_local___v2
@@ -357,7 +357,7 @@ invariants:
             basis: checked
             evidence:
               - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 1673, symbol: dispatch_dequeue}
-              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1712, symbol: dispatch_dequeue, note: "WARN_ON_ONCE(!list_empty) when the mover already unlinked p"}
+              - {kind: warn_only, file: kernel/sched/ext.c, line: 1712, symbol: dispatch_dequeue, note: "WARN_ON_ONCE(!list_empty) when the mover already unlinked p"}
               - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1683, end_line: 1688, symbol: dispatch_dequeue}
           - id: release_same_rq
             access: {struct: task_struct, fields: [scx.holding_cpu], op: write, instance: p}
@@ -408,7 +408,8 @@ invariants:
           - id: move
             access: {struct: task_struct, fields: [scx.dsq, scx.dsq_list.node], op: write, instance: p}
             sites:
-              - {function: scx_dsq_move, file: kernel/sched/ext.c, line: 8423, note: "move_task_between_dsqs(): unlink 2489 / 2503, relink 2490 / 2495 / 2506"}
+              - {function: move_task_between_dsqs, file: kernel/sched/ext.c, line: 2489, end_line: 2491, note: "same rq: task_unlink_from_dsq + move_local_task_to_local_dsq, src_dsq->lock still held"}
+              - {function: move_task_between_dsqs, file: kernel/sched/ext.c, line: 2503, note: "non-local destination: dispatch_dequeue_locked, src_dsq->lock still held"}
             requires:
               locks:
                 - {lock: rq, instance: src_rq, state: held}
@@ -434,7 +435,8 @@ invariants:
               - root: scx_bpf_dsq_move
                 steps:
                   - {function: scx_bpf_dsq_move, file: kernel/sched/ext.c, line: 8626, call: "scx_dsq_move((struct bpf_iter_scx_dsq_kern *)it__iter, p, dsq_id, enq_flags)", held: []}
-                  - {function: scx_dsq_move, file: kernel/sched/ext.c, line: 8423, held: [{lock: rq, instance: src_rq}, {lock: dsq, instance: src_dsq}], note: "locks taken 8391-8401, ownership re-checked 8404"}
+                  - {function: scx_dsq_move, file: kernel/sched/ext.c, line: 8423, call: "move_task_between_dsqs(sch, p, enq_flags, src_dsq, dst_dsq)", held: [{lock: rq, instance: src_rq}, {lock: dsq, instance: src_dsq}], note: "locks taken 8391-8401, ownership re-checked 8404"}
+                  - {function: move_task_between_dsqs, file: kernel/sched/ext.c, line: 2489, held: [{lock: rq, instance: src_rq}, {lock: dsq, instance: src_dsq}], note: "src_rq = task_rq(p) (2463), both asserted at 2466-2467"}
         applies_to: [scx_bpf_dsq_move, scx_bpf_dsq_move_vtime]
         enforcement:
           expected: runtime
@@ -447,7 +449,7 @@ invariants:
           - {file: kernel/sched/ext.c, line: 673, end_line: 694, symbol: nldsq_cursor_lost_task}
           - {file: kernel/sched/ext.c, line: 8344, end_line: 8438, symbol: scx_dsq_move}
           - {file: kernel/sched/ext.c, line: 2442, end_line: 2508, symbol: move_task_between_dsqs}
-        notes: "In the remote branch (2493-2496) src_dsq is unlocked before deactivate_task() unlinks p; a concurrent consumer can claim p via holding_cpu in that window and then loses to dispatch_dequeue (1702-1713). Correct by the holding_cpu protocol, worth a stress test."
+        notes: "Sites are the unlinks done with both source locks held. The relinks at 2495 (remote local DSQ) and 2506 (non-local DSQ) run after src_dsq->lock is dropped and are covered by the destination-lock rules in I1. In the remote branch (2493-2496) src_dsq is unlocked before deactivate_task() unlinks p; a concurrent consumer can claim p via holding_cpu in that window and then loses to dispatch_dequeue (1702-1713). Correct by the holding_cpu protocol, worth a stress test."
 
       - id: I2.task_state.transitions
         title: "The lifecycle state in p->scx.flags changes only through scx_set_task_state() along the edges it accepts"
@@ -490,9 +492,9 @@ invariants:
                   checked_by: [scx_set_task_state]
                   on_failure: continue
                   note: "WARN_ONCE (752-753) and the write proceeds; only an undefined target returns (746-749)"
-            basis: checked
+            basis: documented
             evidence:
-              - {kind: runtime_check, file: kernel/sched/ext.c, line: 724, end_line: 753, symbol: scx_set_task_state}
+              - {kind: warn_only, file: kernel/sched/ext.c, line: 724, end_line: 753, symbol: scx_set_task_state, note: "WARN_ONCE on an invalid edge; the state is still written (755-756)"}
               - {kind: kernel_comment, file: include/linux/sched/ext.h, line: 105, end_line: 114, note: "state meanings"}
         applies_to: ["*"]
         enforcement:
@@ -507,7 +509,7 @@ invariants:
           - {file: include/linux/sched/ext.h, line: 96, end_line: 124, symbol: scx_ent_flags}
           - {file: kernel/sched/ext.c, line: 3858, end_line: 3895, symbol: sched_ext_dead}
           - {file: kernel/sched/ext.c, line: 6986, end_line: 7024, note: "root enable: INIT_BEGIN under the iter rq lock, DEAD re-check"}
-        notes: "applies_to '*' because no kfunc writes the state directly; every kfunc depends on it through scx_task_on_sched()/enable state. ENABLED -> NONE is accepted by the check but not produced: __scx_disable_and_exit_task() disables first (ENABLED -> READY). scx_sub_disable (5850-5855) re-initializes a task for the parent scheduler via ENABLED -> READY -> NONE -> INIT_BEGIN -> INIT -> READY -> ENABLED under task_rq_lock + sched_change."
+        notes: "requires.transitions lists the edges the code takes; the valid_edge predicate is the larger set the switch accepts (it also accepts ENABLED -> NONE and NONE -> NONE, 724-726). applies_to '*' because no kfunc writes the state directly; every kfunc depends on it through scx_task_on_sched()/enable state. ENABLED -> NONE is accepted by the check but not produced: __scx_disable_and_exit_task() disables first (ENABLED -> READY). scx_sub_disable (5850-5855) re-initializes a task for the parent scheduler via ENABLED -> READY -> NONE -> INIT_BEGIN -> INIT -> READY -> ENABLED under task_rq_lock + sched_change."
 
       - id: I2.task_state.serialization
         title: "Draft: lifecycle-state writes are serialized by task_rq(p) or by p not yet being visible"
