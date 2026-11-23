@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=ok
+ * scxa: invariant=I1 expect=ok rule=I1.create_dsq.sleepable
  *
  * scx_bpf_create_dsq() is an unlocked-only, sleepable kfunc: ops.init (no rq lock held) may call it.
  */

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=verifier_reject
+ * scxa: invariant=I1 expect=verifier_reject rule=I1.dsq_move.context reason="scx_bpf_dsq_move is not allowed"
  *
  * ops.enqueue runs with the task's rq locked; scx_bpf_dsq_move() would take a DSQ and rq lock
  * under it, so the kfunc context filter rejects it there (dispatch and unlocked ops only).

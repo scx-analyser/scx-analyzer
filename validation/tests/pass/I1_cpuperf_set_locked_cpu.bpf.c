@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=ok
+ * scxa: invariant=I1 expect=ok rule=I1.rq_scx.rq_lock
  *
  * rq->scx.cpuperf_target is protected by that rq's lock. ops.dispatch holds the lock of the
  * dispatching CPU, so scx_bpf_cpuperf_set() on that same CPU writes it under the right lock.

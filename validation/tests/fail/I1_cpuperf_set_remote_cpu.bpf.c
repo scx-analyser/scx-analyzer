@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=runtime_error
+ * scxa: invariant=I1 expect=runtime_error rule=I1.rq_scx.rq_lock reason="Invalid target CPU"
  *
  * With one rq lock held, writing another CPU's cpuperf_target would need a second rq lock
  * (ABBA risk), so scx_bpf_cpuperf_set() rejects it at runtime: "Invalid target CPU". Needs CPUS > 1.

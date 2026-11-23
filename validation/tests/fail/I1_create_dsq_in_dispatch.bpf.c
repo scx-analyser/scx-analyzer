@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=verifier_reject
+ * scxa: invariant=I1 expect=verifier_reject rule=I1.create_dsq.sleepable reason="scx_bpf_create_dsq is not allowed"
  *
- * ops.dispatch runs with the rq locked; scx_bpf_create_dsq() is unlocked-only (and sleepable),
- * so the verifier rejects it there.
+ * ops.dispatch runs with the rq locked and scx_bpf_create_dsq() is unlocked-only: the kfunc
+ * context filter rejects it before the sleepable check is reached (see I1_create_dsq_in_atomic_init).
  */
 #include <scx/common.bpf.h>
 
