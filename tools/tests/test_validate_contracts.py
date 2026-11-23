@@ -167,12 +167,18 @@ class CatalogValidatorTests(unittest.TestCase):
         self.assert_ok(doc)
 
     def test_basis_without_matching_evidence_rejected(self):
-        for basis, kind in (("checked", "kernel_comment"), ("documented", "acquired_on_path"),
-                            ("observed", "kernel_comment")):
+        for basis, kind in (("checked", "kernel_comment"), ("checked", "warn_only"),
+                            ("documented", "acquired_on_path"), ("observed", "kernel_comment")):
             doc = catalog()
             rule0(doc)["obligations"] = [obligation(
                 basis=basis, evidence=[{"kind": kind, "file": "kernel/sched/ext.c", "line": 1}])]
             self.assert_fails(doc, f"{basis!r} needs evidence")
+
+    def test_warn_only_evidence_supports_documented(self):
+        doc = catalog()
+        rule0(doc)["obligations"] = [obligation(
+            basis="documented", evidence=[{"kind": "warn_only", "file": "kernel/sched/ext.c", "line": 1524}])]
+        self.assert_ok(doc)
 
     def test_obligation_field_must_be_in_objects(self):
         doc = catalog()
@@ -225,6 +231,27 @@ class CatalogValidatorTests(unittest.TestCase):
         rule0(doc)["obligations"] = [obligation(paths=[{"root": "scx_bpf_dsq_move_to_local", "steps": [
             {"function": "consume_dispatch_q", "file": "kernel/sched/ext.c", "line": 2543, "held": []}]}])]
         self.assert_fails(doc, "is not a site function")
+
+    def test_path_root_must_be_in_applies_to(self):
+        doc = catalog()
+        rule0(doc)["obligations"] = [obligation(paths=[{"root": "scx_bpf_dsq_move", "steps": [
+            {"function": "move_local_task_to_local_dsq", "file": "kernel/sched/ext.c", "line": 2266, "held": []}]}])]
+        self.assert_fails(doc, "is not in the rule's applies_to")
+
+    def test_path_root_in_applies_to_accepted(self):
+        doc = catalog()
+        rule0(doc)["obligations"] = [obligation(paths=[{"root": "scx_bpf_dsq_move_to_local", "steps": [
+            {"function": "move_local_task_to_local_dsq", "file": "kernel/sched/ext.c", "line": 2266, "held": []}]}])]
+        self.assert_ok(doc)
+
+    def test_cross_contract_reports_missing_findings_enum(self):
+        saved = vc.SCHEMAS["findings"]
+        try:
+            vc.SCHEMAS["findings"] = {"properties": {}}
+            errs = vc.cross_contract_errors()
+        finally:
+            vc.SCHEMAS["findings"] = saved
+        self.assertTrue(any("findings schema" in e for e in errs), errs)
 
     def test_site_end_line_before_line_rejected(self):
         doc = catalog()
