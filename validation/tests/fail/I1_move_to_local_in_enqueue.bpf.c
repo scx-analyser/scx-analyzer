@@ -9,14 +9,22 @@
 
 char _license[] SEC("license") = "GPL";
 
+#define DSQ 0
+
+s32 BPF_STRUCT_OPS_SLEEPABLE(t_init)
+{
+	return scx_bpf_create_dsq(DSQ, -1);
+}
+
 void BPF_STRUCT_OPS(t_enqueue, struct task_struct *p, u64 enq_flags)
 {
-	scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, enq_flags);
-	scx_bpf_dsq_move_to_local(SCX_DSQ_GLOBAL, 0);
+	scx_bpf_dsq_insert(p, DSQ, SCX_SLICE_DFL, enq_flags);
+	scx_bpf_dsq_move_to_local(DSQ, 0);
 }
 
 SEC(".struct_ops.link")
 struct sched_ext_ops t_ops = {
+	.init		= (void *)t_init,
 	.enqueue	= (void *)t_enqueue,
 	.name		= "i1_move_to_local_in_enqueue",
 };
