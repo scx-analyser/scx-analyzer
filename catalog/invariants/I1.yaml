@@ -538,11 +538,11 @@ invariants:
               locks:
                 - {lock: rq, instance: src_rq, state: held, note: "src_rq = task_rq(p) (8385)"}
                 - {lock: dsq, instance: src_dsq, state: held}
-            basis: documented
+            basis: checked
             evidence:
               - {kind: kernel_comment, file: kernel/sched/ext.c, line: 8412, end_line: 8415, symbol: scx_dsq_move, note: "@p is still on $src_dsq but this is safe as we're locking it"}
               - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 8391, end_line: 8401, symbol: scx_dsq_move, note: "lock src_rq (8394 or 8397), then src_dsq->lock (8401)"}
-              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 677, end_line: 678, symbol: nldsq_cursor_lost_task, note: "called at 8404 before the writes"}
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 677, end_line: 678, symbol: nldsq_cursor_lost_task, note: "nldsq_cursor_lost_task(&kit->cursor, src_rq, src_dsq, p) is called unconditionally at 8404, before the writes; it asserts src_rq (677) and src_dsq->lock (678)"}
             paths:
               - root: scx_bpf_dsq_move
                 steps:
