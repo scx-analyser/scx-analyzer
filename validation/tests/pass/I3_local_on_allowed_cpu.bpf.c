@@ -2,7 +2,8 @@
 /*
  * scxa: invariant=I3 expect=ok kfunc=scx_bpf_dsq_insert rule=I3.affinity.remote_local_dsq
  *
- * Every task goes to the local DSQ of a CPU in its cpus_ptr, so the remote-rq affinity check passes.
+ * Every task goes to the local DSQ of another CPU in its cpus_ptr when it has one, so the
+ * remote-rq affinity check (task_can_run_on_remote_rq) runs and passes.
  */
 #include <scx/common.bpf.h>
 
@@ -17,11 +18,20 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(t_init)
 
 void BPF_STRUCT_OPS(t_enqueue, struct task_struct *p, u64 enq_flags)
 {
-	s32 cpu = scx_bpf_task_cpu(p);
+	u32 nr = scx_bpf_nr_cpu_ids(), i;
+	s32 cpu = scx_bpf_task_cpu(p), target = -1;
 
-	if (!bpf_cpumask_test_cpu(cpu, p->cpus_ptr))
-		cpu = bpf_cpumask_first(p->cpus_ptr);
-	scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL_ON | cpu, SCX_SLICE_DFL, enq_flags);
+	bpf_for(i, 1, nr) {
+		s32 c = (cpu + i) % nr;
+
+		if (bpf_cpumask_test_cpu(c, p->cpus_ptr)) {
+			target = c;
+			break;
+		}
+	}
+	if (target < 0)
+		target = bpf_cpumask_test_cpu(cpu, p->cpus_ptr) ? cpu : bpf_cpumask_first(p->cpus_ptr);
+	scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL_ON | target, SCX_SLICE_DFL, enq_flags);
 }
 
 void BPF_STRUCT_OPS(t_dispatch, s32 cpu, struct task_struct *prev)

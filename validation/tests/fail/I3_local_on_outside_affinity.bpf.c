@@ -3,7 +3,8 @@
  * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert rule=I3.affinity.remote_local_dsq reason="not allowed for"
  *
  * Pinned tasks (per-CPU kthreads, nr_cpus_allowed == 1) are sent to another CPU's local DSQ.
- * task_can_run_on_remote_rq(enforce=true) rejects that with scx_error, not a fallback.
+ * task_can_run_on_remote_rq(enforce=true) reports it with scx_error, then the task falls back to
+ * the global DSQ.
  */
 #include <scx/common.bpf.h>
 
