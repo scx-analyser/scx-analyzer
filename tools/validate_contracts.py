@@ -55,7 +55,7 @@ RUNTIME_MECHS = {"lock", "scx_error", "warn", "guard", "atomic", "kf_mask"}
 # obligation basis -> evidence kinds that can support it
 BASIS_EVIDENCE = {
     "checked": {"lockdep_assert", "runtime_check"},
-    "documented": {"kernel_comment"},
+    "documented": {"kernel_comment", "warn_only"},
     "observed": {"acquired_on_path", "lockdep_assert"},
 }
 
