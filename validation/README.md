@@ -27,7 +27,7 @@ validation/vm/run-selftests.sh -t minimal # runner args pass through
 
 It uses the kernel tree in `$KERNEL_SRC` (default `~/linux`, the same tree as `catalog/scripts/inventory.py`),
 shallow-fetching the pinned commit if the directory does not exist, and refuses to run if the tree is at another
-commit. The guest shares the host root filesystem read-only, so binaries built on the host run inside it.
+commit. Upstream tests listed as `known_flaky` in the script still run but do not fail it. The guest shares the host root filesystem read-only, so binaries built on the host run inside it.
 Config: virtme-ng's minimal config + `tools/testing/selftests/sched_ext/config` + [`vm/config`](vm/config).
 
 **Host:** Linux (x86_64 or arm64), ideally with `/dev/kvm`. Ubuntu 24.04 packages:

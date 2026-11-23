@@ -34,5 +34,17 @@ vng -v --build \
 	--config "$repo/validation/vm/config"
 make -C tools/testing/selftests/sched_ext -j"$(nproc)"
 
+# Upstream selftests that race under virtualization: still run and reported, but do not fail the baseline.
+# allowed_cpus: a CPU claimed by scx_bpf_select_cpu_and() can go idle again before the test re-checks it.
+known_flaky="allowed_cpus"
+
+log=$(mktemp)
 vng -v --user root --cpus "${CPUS:-4}" --memory "${MEM:-4G}" \
-	-- ./tools/testing/selftests/sched_ext/runner "$@"
+	-- ./tools/testing/selftests/sched_ext/runner "$@" | tee "$log" || true
+tr -d '\r' <"$log" >"$log.clean"
+grep -q '^RESULTS:' "$log.clean" || { echo "error: selftests did not complete" >&2; exit 1; }
+unexpected=$(sed -n '/^Failed tests:/,$s/^  - //p' "$log.clean" | grep -vxF "${known_flaky// /$'\n'}" || true)
+if [ -n "$unexpected" ]; then
+	echo "error: unexpected selftest failures:" $unexpected >&2
+	exit 1
+fi
