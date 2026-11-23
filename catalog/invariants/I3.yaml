@@ -33,7 +33,7 @@ kernel_version: "v7.1"
 kernel_commit: 8cd9520d35a6c38db6567e97dd93b1f11f185dc6
 invariants:
   - id: I3
-    title: "A CPU, task-affinity or DSQ-id argument supplied by the BPF scheduler is validated before the scheduler state it indexes or targets is modified"
+    title: "A CPU, task-affinity or DSQ-id argument supplied by the BPF scheduler is checked before the scheduler state it indexes or targets is modified (CPUs: range/possible-checked, not online-checked)"
     description: >-
       For sched_ext kfuncs that take a CPU number, a task or a DSQ id and then
       modify shared scheduler state, directly or along their kernel call paths,
@@ -338,7 +338,7 @@ invariants:
         notes: "scx_bpf_dsq_insert* are not in applies_to: their move happens later in the core (finish_dispatch / process_ddsp_deferred_locals), outside the kfunc's own call path. The check sits in the shared helpers, so it covers those core paths too."
 
       - id: I3.dsq_id.dispatch_target
-        title: "A BPF-supplied DSQ id is resolved and validated (LOCAL_ON cpu range, user DSQ existence) before a task is enqueued on the resulting DSQ"
+        title: "A BPF-supplied DSQ id is resolved and checked (LOCAL_ON cpu range/possible-checked, user DSQ existence) before a task is enqueued on the resulting DSQ"
         description: >-
           find_dsq_for_dispatch() (1735-1764) decodes the id: SCX_DSQ_LOCAL ->
           rq's local DSQ; SCX_DSQ_LOCAL_ON | cpu -> ops_cpu_valid(cpu) (1747),
@@ -431,7 +431,7 @@ invariants:
           - {file: kernel/sched/ext.c, line: 335, end_line: 338, symbol: find_user_dsq}
           - {file: kernel/sched/ext.c, line: 1823, symbol: direct_dispatch, note: "same resolution for ops.select_cpu/enqueue direct dispatch"}
           - {file: kernel/sched/ext.c, line: 9179, symbol: scx_bpf_dsq_reenq}
-        notes: "find_dsq_for_dispatch() never returns NULL: every invalid id becomes the global DSQ after scx_error(), so the scheduler is aborted but the task is still enqueued somewhere valid. A LOCAL_ON cpu that is possible but offline passes here and is caught by I3.affinity.remote_local_dsq (offline -> global, event only)."
+        notes: "find_dsq_for_dispatch() never returns NULL: every invalid id becomes the global DSQ after scx_error(), so the scheduler is aborted but the task is still enqueued somewhere valid. A LOCAL_ON cpu that is possible but offline passes here and is caught by I3.affinity.remote_local_dsq (offline -> global, event only). scx_bpf_dsq_reenq resolves the id synchronously (9179), but the re-enqueue is asynchronous: schedule_dsq_reenq() (1216, called at 9180) only queues the DSQ for deferred processing, so the dispatch_enqueue sites are not on the kfunc's own call path and a consumer should not expect a direct path from it."
 
       - id: I3.idle.kfunc_allowed_mask
         title: "Draft: select_cpu kfuncs may claim prev_cpu's idle bit for a single-CPU task without checking p->cpus_ptr when a BPF cpumask is passed"
