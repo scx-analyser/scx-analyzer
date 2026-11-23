@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=runtime_error rule=I1.dsq_insert.commit_guards reason="already direct-dispatched"
+ * scxa: invariant=I1 expect=runtime_error kfunc=scx_bpf_dsq_insert rule=I1.dsq_insert.commit_guards reason="already direct-dispatched"
  *
  * The first insert spoils direct_dispatch_task, so a second insert of the same task in one
  * ops.enqueue fails the p == ddsp_task guard instead of overwriting ddsp_dsq_id.

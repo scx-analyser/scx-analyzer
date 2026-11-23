@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=ok rule=I1.dsq_insert.commit_guards
+ * scxa: invariant=I1 expect=ok kfunc=scx_bpf_dsq_insert rule=I1.dsq_insert.commit_guards
  *
  * Direct dispatch: ops.enqueue may insert the task being enqueued once; the kernel records
  * ddsp_dsq_id/ddsp_enq_flags only for p == the captured direct_dispatch_task.

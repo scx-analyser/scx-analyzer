@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=runtime_error rule=I1.dsq_insert.commit_guards reason="dispatch buffer overflow"
+ * scxa: invariant=I1 expect=runtime_error kfunc=scx_bpf_dsq_insert rule=I1.dsq_insert.commit_guards reason="dispatch buffer overflow"
  *
  * With dispatch_max_batch = 1, a second insert in one ops.dispatch would write past dspc->buf;
  * the cursor < dsp_max_batch guard aborts the scheduler instead.

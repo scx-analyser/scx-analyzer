@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=ok rule=I1.dsq_move.slice_vtime
+ * scxa: invariant=I1 expect=ok kfunc=scx_bpf_dsq_move rule=I1.dsq_move.slice_vtime
  *
  * Setting slice and vtime on the iterator makes scx_bpf_dsq_move() write p->scx.slice and
  * p->scx.dsq_vtime, which it does under task_rq(p) and the source DSQ lock (in_balance branch).

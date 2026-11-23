@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=ok rule=I1.dsq_move.context
+ * scxa: invariant=I1 expect=ok kfunc=scx_bpf_dsq_move rule=I1.dsq_move.context
  *
  * scx_bpf_dsq_move() takes the source DSQ lock itself, so it is only allowed where no rq/DSQ
  * lock it could invert against is held by the caller: ops.dispatch or unlocked ops.

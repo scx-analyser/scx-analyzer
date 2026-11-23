@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=ok rule=I1.dsq_insert.commit_guards
+ * scxa: invariant=I1 expect=ok kfunc=scx_bpf_dsq_insert rule=I1.dsq_insert.commit_guards
  *
  * Buffered dispatch: with dispatch_max_batch = 1, one insert per ops.dispatch stays within
  * dspc->buf. prev is running (ops_state NONE), so the flush drops it; only the guard runs.

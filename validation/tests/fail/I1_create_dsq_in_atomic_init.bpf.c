@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=verifier_reject rule=I1.create_dsq.sleepable reason="must be sleepable to call sleepable kfunc scx_bpf_create_dsq"
+ * scxa: invariant=I1 expect=verifier_reject kfunc=scx_bpf_create_dsq rule=I1.create_dsq.sleepable reason="must be sleepable to call sleepable kfunc scx_bpf_create_dsq"
  *
  * Same op as pass/I1_create_dsq_in_init, but declared non-sleepable: ops.init allows unlocked
  * kfuncs, so the context filter passes and the verifier's sleepable check is what rejects it.

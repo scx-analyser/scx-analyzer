@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I1 expect=ok rule=I1.dsq_move.slice_vtime
+ * scxa: invariant=I1 expect=ok kfunc=scx_bpf_dsq_move rule=I1.dsq_move.slice_vtime
  *
  * ops.init_task holds no rq lock (fork path and enable loop both drop it), so scx_bpf_dsq_move()
  * takes the !in_balance branch: it locks task_rq(p) itself before the slice/vtime writes.
