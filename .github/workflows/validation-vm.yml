@@ -2,9 +2,9 @@ name: validation-vm
 on:
   push:
     branches: [main]
-    paths: [validation/vm/**, KERNEL_COMMIT, .github/workflows/validation-vm.yml]
+    paths: [validation/vm/**, validation/harness/**, validation/tests/**, KERNEL_COMMIT, .github/workflows/validation-vm.yml]
   pull_request:
-    paths: [validation/vm/**, KERNEL_COMMIT, .github/workflows/validation-vm.yml]
+    paths: [validation/vm/**, validation/harness/**, validation/tests/**, KERNEL_COMMIT, .github/workflows/validation-vm.yml]
   workflow_dispatch:
 jobs:
   selftests:
@@ -12,10 +12,12 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Harness unit tests
+        run: python3 -m unittest discover -s validation/harness -v
       - name: Install build and VM dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential flex bison bc cpio libelf-dev libssl-dev zlib1g-dev \
+          sudo apt-get install -y build-essential flex bison bc cpio libelf-dev libssl-dev zlib1g-dev libzstd-dev \
             clang llvm lld qemu-system-x86 busybox-static cmake libdw-dev
           pip install virtme-ng
       - name: Build pahole 1.30 (Ubuntu's 1.25 lacks kfunc decl tags)
@@ -33,3 +35,12 @@ jobs:
         env:
           KERNEL_SRC: ${{ runner.temp }}/linux
         run: validation/vm/run-selftests.sh
+      - name: Run validation tests through the harness
+        env:
+          KERNEL_SRC: ${{ runner.temp }}/linux
+        run: python3 validation/harness/harness.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: harness-results
+          path: validation/results/
