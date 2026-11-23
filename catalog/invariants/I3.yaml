@@ -26,7 +26,9 @@
 #   0 <= cpu < nr_cpu_ids && cpu_possible(cpu)) or scx_error(). It does not
 #   check that the CPU is online.
 # - on_failure: return = explicit return before the write; error = scx_error()
-#   and the write is skipped by control flow but no return statement; fallback
+#   and the write is skipped by control flow but no return statement (except
+#   I3.dsq_id.vtime_ordering no_mixed_mode, a reporting check whose write still
+#   happens; its basis is documented, and the note says so); fallback
 #   = the write is redirected to the global DSQ; continue = the candidate is
 #   skipped silently and the loop continues.
 kernel_version: "v7.1"
@@ -432,6 +434,181 @@ invariants:
           - {file: kernel/sched/ext.c, line: 1823, symbol: direct_dispatch, note: "same resolution for ops.select_cpu/enqueue direct dispatch"}
           - {file: kernel/sched/ext.c, line: 9179, symbol: scx_bpf_dsq_reenq}
         notes: "find_dsq_for_dispatch() never returns NULL: every invalid id becomes the global DSQ after scx_error(), so the scheduler is aborted but the task is still enqueued somewhere valid. A LOCAL_ON cpu that is possible but offline passes here and is caught by I3.affinity.remote_local_dsq (offline -> global, event only). scx_bpf_dsq_reenq resolves the id synchronously (9179), but the re-enqueue is asynchronous: schedule_dsq_reenq() (1216, called at 9180) only queues the DSQ for deferred processing, so the dispatch_enqueue sites are not on the kfunc's own call path and a consumer should not expect a direct path from it."
+
+      - id: I3.dsq_id.vtime_ordering
+        title: "Vtime (PRIQ) ordering is only applied to a user DSQ that holds no FIFO-queued tasks, and FIFO inserts are refused on a DSQ that holds PRIQ tasks"
+        description: >-
+          scx_bpf_dsq_insert_vtime() / __scx_bpf_dsq_insert_vtime() and
+          scx_bpf_dsq_move_vtime() tag the insert with the internal flag
+          SCX_ENQ_DSQ_PRIQ (8240, 8652). The DSQ is only known once the id is
+          resolved, so the checks sit in dispatch_enqueue(), which every insert
+          reaches (finish_dispatch 2746, direct_dispatch, move_task_between_dsqs).
+          Built-in DSQs (SCX_DSQ_FLAG_BUILTIN: local, global) are FIFO only:
+          1541-1542 reports "cannot use vtime ordering for built-in DSQs"
+          (1550) and clears SCX_ENQ_DSQ_PRIQ (1551), so the rbtree insert at
+          1568 is skipped and the task is queued FIFO instead. A DSQ is either
+          FIFO or PRIQ: a PRIQ insert into a DSQ whose rbtree is empty but whose
+          list holds a task reports "already had FIFO-enqueued tasks"
+          (1562-1565), and a FIFO insert into a DSQ with a non-empty rbtree
+          reports "already had PRIQ-enqueued tasks" (1588-1590). Neither of the
+          two mixing checks returns or changes the flags: the write still
+          happens and only scx_error() aborts the scheduler. The kfunc comment
+          states both rules (8275-8278).
+        category: argument_validity
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: scx_dispatch_q, fields: [list, priq, nr, seq, first_task]}
+        access: write
+        requires:
+          predicates:
+            - expr: "!((dsq->id & SCX_DSQ_FLAG_BUILTIN) && (enq_flags & SCX_ENQ_DSQ_PRIQ))"
+              evaluated_at: {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1541}
+              checked_by: [dispatch_enqueue]
+              on_failure: error
+        obligations:
+          - id: builtin_fifo_only
+            access: {struct: scx_dispatch_q, fields: [priq], op: write, instance: dsq}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1568, note: "rb_add(&p->scx.dsq_priq, &dsq->priq, ...); vtime-ordered list insert at 1579 / 1582"}
+            when: "enq_flags & SCX_ENQ_DSQ_PRIQ"
+            requires:
+              predicates:
+                - expr: "!(dsq->id & SCX_DSQ_FLAG_BUILTIN)"
+                  evaluated_at: {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1541}
+                  checked_by: [dispatch_enqueue]
+                  on_failure: error
+                  note: "guard 1541-1542 -> scx_error 1550 + enq_flags &= ~SCX_ENQ_DSQ_PRIQ 1551 -> branch 1554 not taken, so the PRIQ write 1568 is skipped by control flow (no return). The task is still queued, FIFO, at 1593 / 1603."
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1541, end_line: 1552, symbol: dispatch_enqueue}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1543, end_line: 1548, symbol: dispatch_enqueue, note: "built-in DSQs always consume FIFO; vtime ordering is disallowed on them"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 8277, end_line: 8278, symbol: __scx_bpf_dsq_insert_vtime}
+          - id: no_mixed_mode
+            access: {struct: scx_dispatch_q, fields: [list, priq, nr, seq, first_task], op: write, instance: dsq}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1567, end_line: 1585, note: "PRIQ insert"}
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1592, end_line: 1606, note: "FIFO insert"}
+            requires:
+              predicates:
+                - expr: "!(RB_EMPTY_ROOT(&dsq->priq) && nldsq_next_task(dsq, NULL, false))"
+                  evaluated_at: {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1562}
+                  checked_by: [dispatch_enqueue]
+                  on_failure: error
+                  note: "PRIQ insert. guard 1562-1563 -> scx_error('already had FIFO-enqueued tasks') 1564, no return, the write 1567-1585 still happens. Only detected while the rbtree is empty, i.e. on the first PRIQ insert (comment 1557-1560)."
+                - expr: "RB_EMPTY_ROOT(&dsq->priq)"
+                  evaluated_at: {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1588}
+                  checked_by: [dispatch_enqueue]
+                  on_failure: error
+                  note: "FIFO insert. guard 1588 -> scx_error('already had PRIQ-enqueued tasks') 1589, no return, the write 1592-1606 still happens."
+            basis: documented
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 8275, end_line: 8277, symbol: __scx_bpf_dsq_insert_vtime, note: "a DSQ is a FIFO or a priority queue at any given time"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1557, end_line: 1560, symbol: dispatch_enqueue}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1587, symbol: dispatch_enqueue}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1562, end_line: 1565, symbol: dispatch_enqueue, note: "scx_error without return"}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1588, end_line: 1590, symbol: dispatch_enqueue, note: "scx_error without return"}
+            note: "Reporting check, not a dominating guard: the scheduler is aborted but this insert is done. basis is documented, not checked, for that reason."
+        applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, scx_bpf_dsq_insert_vtime, __scx_bpf_dsq_insert_vtime, scx_bpf_dsq_move, scx_bpf_dsq_move_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [scx_error]
+          sites:
+            - {file: kernel/sched/ext.c, line: 1541, end_line: 1552, symbol: dispatch_enqueue}
+            - {file: kernel/sched/ext.c, line: 1562, end_line: 1565, symbol: dispatch_enqueue}
+            - {file: kernel/sched/ext.c, line: 1588, end_line: 1590, symbol: dispatch_enqueue}
+        references:
+          - {file: kernel/sched/ext.c, line: 1518, end_line: 1614, symbol: dispatch_enqueue}
+          - {file: kernel/sched/ext.c, line: 8227, end_line: 8243, symbol: scx_dsq_insert_vtime, note: "commit with enq_flags | SCX_ENQ_DSQ_PRIQ at 8240"}
+          - {file: kernel/sched/ext.c, line: 8647, end_line: 8653, symbol: scx_bpf_dsq_move_vtime}
+          - {file: kernel/sched/ext.c, line: 2741, end_line: 2746, symbol: finish_dispatch}
+        notes: "For scx_bpf_dsq_insert*, the check runs later in the core (finish_dispatch / direct_dispatch), not on the kfunc's own call path, as for I3.dsq_id.dispatch_target. The error names the DSQ id (0x%016llx)."
+
+      - id: I3.enq_flags.dsq_insert
+        title: "scx_bpf_dsq_insert*: enq_flags are checked (no kernel-internal bits; SCX_ENQ_IMMED only for a local DSQ) before the insert is recorded"
+        description: >-
+          scx_dsq_insert_preamble() (8099-8124) runs before every insert kfunc
+          records anything: scx_bpf_dsq_insert___v2 (8204) and
+          scx_dsq_insert_vtime (8230, reached from scx_bpf_dsq_insert_vtime and
+          __scx_bpf_dsq_insert_vtime). It rejects any bit of
+          __SCX_ENQ_INTERNAL_MASK (bits 56-63, ext_internal.h:1146; e.g.
+          SCX_ENQ_CLEAR_OPSS, SCX_ENQ_DSQ_PRIQ) with scx_error("invalid
+          enq_flags 0x%llx") and return false (8109-8111), then calls
+          scx_vet_enq_flags() (8120), which rejects SCX_ENQ_IMMED for a DSQ id
+          other than SCX_DSQ_LOCAL / SCX_DSQ_LOCAL_ON with scx_error("SCX_ENQ_IMMED
+          on a non-local DSQ 0x%llx") and return false (8087-8090). On failure
+          the kfunc returns before p->scx.slice (8208), p->scx.dsq_vtime (8238)
+          and the insert record (scx_dsq_insert_commit: direct-dispatch fields
+          via mark_direct_dispatch, or the dispatch buffer entry 8143) are
+          written. scx_dsq_move (scx_bpf_dsq_move*) runs only the IMMED check
+          (8364-8365).
+        category: argument_validity
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: scx_dsp_ctx, fields: [buf, cursor]}
+          - {struct: task_struct, fields: [scx.slice, scx.dsq_vtime, scx.ddsp_dsq_id, scx.ddsp_enq_flags]}
+        access: write
+        requires:
+          predicates:
+            - expr: "!(enq_flags & __SCX_ENQ_INTERNAL_MASK)"
+              evaluated_at: {function: scx_dsq_insert_preamble, file: kernel/sched/ext.c, line: 8109}
+              checked_by: [scx_dsq_insert_preamble]
+              on_failure: return
+        obligations:
+          - id: internal_bits
+            access: {struct: scx_dsp_ctx, fields: [buf, cursor], op: write, instance: "this_cpu_ptr(sch->pcpu)->dsp_ctx"}
+            sites:
+              - {function: scx_dsq_insert_commit, file: kernel/sched/ext.c, line: 8143, end_line: 8148, note: "dispatch buffer entry with dsq_id and enq_flags"}
+              - {function: mark_direct_dispatch, file: kernel/sched/ext.c, line: 1793, end_line: 1794, note: "p->scx.ddsp_dsq_id / ddsp_enq_flags, called from scx_dsq_insert_commit 8134"}
+            requires:
+              predicates:
+                - expr: "!(*enq_flags & __SCX_ENQ_INTERNAL_MASK)"
+                  evaluated_at: {function: scx_dsq_insert_preamble, file: kernel/sched/ext.c, line: 8109}
+                  checked_by: [scx_dsq_insert_preamble]
+                  on_failure: return
+                  note: "guard 8109 -> scx_error('invalid enq_flags') 8110 + return false 8111 -> kfunc returns at 8205 / 8231 -> scx_dsq_insert_commit 8212 / 8240 not reached"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8109, end_line: 8111, symbol: scx_dsq_insert_preamble}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8204, end_line: 8205, symbol: scx_bpf_dsq_insert___v2}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8230, end_line: 8231, symbol: scx_dsq_insert_vtime}
+            paths:
+              - root: scx_bpf_dsq_insert
+                steps:
+                  - {function: scx_bpf_dsq_insert, file: kernel/sched/ext.c, line: 8224, call: "scx_bpf_dsq_insert___v2(p, dsq_id, slice, enq_flags, aux)", held: []}
+                  - {function: scx_bpf_dsq_insert___v2, file: kernel/sched/ext.c, line: 8212, call: "scx_dsq_insert_commit(sch, p, dsq_id, enq_flags)", held: [], note: "after the preamble at 8204"}
+                  - {function: scx_dsq_insert_commit, file: kernel/sched/ext.c, line: 8143, held: []}
+          - id: immed_local_only
+            access: {struct: scx_dsp_ctx, fields: [buf, cursor], op: write, instance: "this_cpu_ptr(sch->pcpu)->dsp_ctx"}
+            sites:
+              - {function: scx_dsq_insert_commit, file: kernel/sched/ext.c, line: 8143, end_line: 8148}
+              - {function: mark_direct_dispatch, file: kernel/sched/ext.c, line: 1793, end_line: 1794}
+            when: "enq_flags & SCX_ENQ_IMMED"
+            requires:
+              predicates:
+                - expr: "dsq_id == SCX_DSQ_LOCAL || (dsq_id & SCX_DSQ_LOCAL_ON) == SCX_DSQ_LOCAL_ON"
+                  evaluated_at: {function: scx_vet_enq_flags, file: kernel/sched/ext.c, line: 8088}
+                  checked_by: [scx_dsq_insert_preamble, scx_vet_enq_flags]
+                  on_failure: return
+                  note: "guard 8087-8088 -> scx_error('SCX_ENQ_IMMED on a non-local DSQ') 8089 + return false 8090 -> preamble returns false 8120-8121 -> kfunc returns at 8205 / 8231"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8084, end_line: 8091, symbol: scx_vet_enq_flags}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8120, end_line: 8121, symbol: scx_dsq_insert_preamble}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8364, end_line: 8365, symbol: scx_dsq_move, note: "same check for scx_bpf_dsq_move*"}
+        applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, scx_bpf_dsq_insert_vtime, __scx_bpf_dsq_insert_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [guard, scx_error]
+          sites:
+            - {file: kernel/sched/ext.c, line: 8109, end_line: 8111, symbol: scx_dsq_insert_preamble}
+            - {file: kernel/sched/ext.c, line: 8087, end_line: 8090, symbol: scx_vet_enq_flags}
+        references:
+          - {file: kernel/sched/ext.c, line: 8082, end_line: 8124, symbol: scx_dsq_insert_preamble}
+          - {file: kernel/sched/ext.c, line: 8126, end_line: 8149, symbol: scx_dsq_insert_commit}
+          - {file: kernel/sched/ext_internal.h, line: 1145, end_line: 1151, symbol: scx_enq_flags, note: "high 8 bits are internal"}
+        notes: "The IMMED check sees the raw id, before resolution: SCX_DSQ_LOCAL_ON with an invalid cpu passes here and is caught by I3.dsq_id.dispatch_target. scx_dsq_move does not test __SCX_ENQ_INTERNAL_MASK (only scx_vet_enq_flags at 8364); untested."
 
       - id: I3.idle.kfunc_allowed_mask
         title: "Draft: select_cpu kfuncs may claim prev_cpu's idle bit for a single-CPU task without checking p->cpus_ptr when a BPF cpumask is passed"
