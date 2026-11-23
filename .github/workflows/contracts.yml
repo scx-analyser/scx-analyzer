@@ -13,3 +13,4 @@ jobs:
           python-version: "3.12"
       - run: pip install jsonschema pyyaml
       - run: python3 tools/validate_contracts.py
+      - run: python3 -m unittest discover -s catalog/scripts -p 'test_*.py'
