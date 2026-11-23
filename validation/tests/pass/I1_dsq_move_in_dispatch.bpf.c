@@ -25,8 +25,10 @@ void BPF_STRUCT_OPS(t_dispatch, s32 cpu, struct task_struct *prev)
 {
 	struct task_struct *p;
 
+	/* moving a task to a CPU outside its affinity is a runtime error, not a fallback */
 	bpf_for_each(scx_dsq, p, DSQ, 0)
-		if (scx_bpf_dsq_move(BPF_FOR_EACH_ITER, p, SCX_DSQ_LOCAL, 0))
+		if (bpf_cpumask_test_cpu(cpu, p->cpus_ptr) &&
+		    scx_bpf_dsq_move(BPF_FOR_EACH_ITER, p, SCX_DSQ_LOCAL, 0))
 			return;
 	scx_bpf_dsq_move_to_local(DSQ, 0);
 }
