@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert reason="non-existent DSQ 0xcafef00d"
+ * scxa: invariant=I3 expect=runtime_error kfunc=scx_bpf_dsq_insert rule=I3.dsq_id.dispatch_target reason="non-existent DSQ 0xcafef00d"
  *
  * Inserting into a DSQ id that was never created passes the verifier (the id is just a u64)
  * but the kernel's DSQ lookup fails at runtime and scx_error() ejects the scheduler.
