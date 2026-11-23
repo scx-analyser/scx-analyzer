@@ -481,7 +481,7 @@ invariants:
             basis: checked
             evidence:
               - {kind: runtime_check, file: kernel/sched/ext.c, line: 1779, end_line: 1787, symbol: mark_direct_dispatch}
-              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1790, end_line: 1791, symbol: mark_direct_dispatch, note: "WARN_ON_ONCE unless the fields are still clear"}
+              - {kind: warn_only, file: kernel/sched/ext.c, line: 1790, end_line: 1791, symbol: mark_direct_dispatch, note: "WARN_ON_ONCE unless the fields are still clear; the write proceeds"}
           - id: buffered
             access: {struct: scx_dsp_ctx, fields: [buf, cursor], op: write, instance: dspc}
             sites:
