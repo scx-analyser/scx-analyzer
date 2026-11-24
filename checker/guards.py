@@ -12,6 +12,7 @@ import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
+from heapq import heappop, heappush
 from typing import Any
 
 from .checkers import Finding
@@ -114,6 +115,7 @@ class GuardPolicy:
     reference: SourceReference
     access_kind: str = "write"
     access_line: int | None = None
+    access_object: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.rule_id, str) or not re.fullmatch(r"I3\.[a-z][a-z0-9_.]*", self.rule_id):
@@ -132,6 +134,8 @@ class GuardPolicy:
             raise ValueError("policy access kind must be write or atomic")
         if self.access_line is not None:
             _integer(self.access_line, "policy access line", 1)
+        if self.access_object is not None:
+            _text(self.access_object, "policy access object")
 
 
 @dataclass(frozen=True)
@@ -187,6 +191,104 @@ class GuardSemantics:
 
 
 @dataclass(frozen=True)
+class ControlEdge:
+    """Reviewed source-CFG edge between event IDs; target=None is function exit.
+
+    outcome labels the SOURCE condition, not the required predicate. Event IDs
+    and source line order are never used as a substitute for control flow.
+    """
+    origin: int
+    target: int | None
+    outcome: Truth = Truth.UNKNOWN
+
+    def __post_init__(self) -> None:
+        _integer(self.origin, "CFG origin")
+        if self.target is not None:
+            _integer(self.target, "CFG target")
+        if not isinstance(self.outcome, Truth):
+            raise TypeError("CFG outcome must be a Truth")
+
+
+@dataclass(frozen=True)
+class PredicatePreservation:
+    """Reviewed preservation of ONE proof's predicate and access-object binding.
+
+    This is never inferred from an argument spelling, a by-value prefix, an
+    opaque callee or a write. The reference and reason must justify the effect.
+    """
+    event_index: int
+    reference: SourceReference
+    reason: str
+
+    def __post_init__(self) -> None:
+        _integer(self.event_index, "preservation event")
+        if not isinstance(self.reference, SourceReference):
+            raise TypeError("preservation needs a source reference")
+        _text(self.reason, "preservation reason")
+
+
+@dataclass(frozen=True)
+class DominanceEvidence:
+    """A narrow reviewed local source CFG, bound to one exact policy/access.
+
+    C4 checks every entry-to-access path through this supplied DAG. Completeness,
+    source fidelity and per-event preservation are reviewed inputs, not facts
+    automatically extracted from C. This proves no caller/root-wide coverage.
+    """
+    policy: GuardPolicy
+    graph_digest: str
+    guard_index: int
+    access_index: int
+    edges: tuple[ControlEdge, ...]
+    preserves: tuple[PredicatePreservation, ...]
+    object_bindings: tuple[tuple[str, str], ...]
+    reference: SourceReference
+    stability_references: tuple[SourceReference, ...]
+    rationale: str
+    entry_index: int = 0
+    configuration_independent: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.policy, GuardPolicy):
+            raise TypeError("dominance evidence needs an exact GuardPolicy")
+        if not isinstance(self.graph_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", self.graph_digest):
+            raise ValueError("dominance evidence needs the exact graph fingerprint")
+        for name in ("guard_index", "access_index", "entry_index"):
+            _integer(getattr(self, name), name)
+        if self.guard_index == self.access_index:
+            raise ValueError("guard and access must be distinct events")
+        if self.policy.access_line is None or self.policy.access_object is None:
+            raise ValueError("dominance policy needs an exact access line and object identity")
+        bindings = tuple(self.object_bindings)
+        if any(not isinstance(b, tuple) or len(b) != 2 or not all(isinstance(v, str) and v.strip() for v in b)
+               for b in bindings):
+            raise TypeError("dominance bindings must map immutable identity/expression pairs in the site function")
+        if len({identity for identity, _ in bindings}) != len(bindings):
+            raise ValueError("duplicate dominance object binding")
+        if {identity for identity, _ in bindings} != set(self.policy.predicate.objects) | {self.policy.access_object}:
+            raise ValueError("dominance must bind every exact predicate and accessed-object identity")
+        object.__setattr__(self, "object_bindings", tuple(sorted(bindings)))
+        if not isinstance(self.reference, SourceReference) or self.reference.symbol != self.policy.function:
+            raise ValueError("dominance reference must identify the access function")
+        edges = _tuple(self.edges, ControlEdge, "CFG edges")
+        if len(set(edges)) != len(edges):
+            raise ValueError("duplicate CFG edge")
+        object.__setattr__(self, "edges", tuple(sorted(
+            edges, key=lambda e: (e.origin, e.target is None, e.target or 0, e.outcome.value))))
+        preserves = _tuple(self.preserves, PredicatePreservation, "preservation evidence")
+        if len({p.event_index for p in preserves}) != len(preserves):
+            raise ValueError("duplicate preservation evidence")
+        object.__setattr__(self, "preserves", tuple(sorted(preserves, key=lambda p: p.event_index)))
+        refs = _tuple(self.stability_references, SourceReference, "stability references")
+        if not refs:
+            raise ValueError("dominance needs predicate/object stability evidence")
+        object.__setattr__(self, "stability_references", tuple(sorted(set(refs))))
+        _text(self.rationale, "dominance rationale")
+        if type(self.configuration_independent) is not bool:
+            raise TypeError("configuration_independent must be an explicit boolean")
+
+
+@dataclass(frozen=True)
 class EntryFact:
     predicate: Predicate
     value: Truth
@@ -216,18 +318,26 @@ class Model:
     bindings_verified: bool = False
     synthetic: bool = False
     config_digest: str | None = None
+    dominance: tuple[DominanceEvidence, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.source, Source):
             raise TypeError("model requires a Source")
         if not isinstance(self.graph_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", self.graph_digest):
             raise ValueError("model requires the exact graph SHA-256 fingerprint")
-        for name, kind in (("functions", FunctionModel), ("guards", GuardSemantics)):
+        for name, kind in (("functions", FunctionModel), ("guards", GuardSemantics),
+                           ("dominance", DominanceEvidence)):
             object.__setattr__(self, name, _tuple(getattr(self, name), kind, name))
         if len({f.function for f in self.functions}) != len(self.functions):
             raise ValueError("duplicate function model")
         if len({(g.function, g.event_index) for g in self.guards}) != len(self.guards):
             raise ValueError("duplicate guard annotation")
+        if len({(d.policy, d.access_index) for d in self.dominance}) != len(self.dominance):
+            raise ValueError("duplicate dominance evidence")
+        object.__setattr__(self, "dominance", tuple(sorted(self.dominance, key=lambda d: (
+            d.policy.root, d.policy.function, d.policy.rule_id, d.policy.field,
+            d.policy.access_kind, d.access_index, d.policy.predicate, d.policy.access_object,
+        ))))
         for name in ("bindings_verified", "synthetic"):
             if type(getattr(self, name)) is not bool:
                 raise TypeError(f"{name} must be a boolean attestation")
@@ -270,6 +380,9 @@ class AccessAssessment:
     explanation: str
     evidence: tuple[Evidence, ...]
     unresolved: tuple[str, ...]
+    access_kind: str = "write"
+    access_object: str | None = None
+    proof_basis: str = "ordered_events"
 
 
 @dataclass(frozen=True)
@@ -289,6 +402,7 @@ class AnalysisResult:
     synthetic: bool
     graph_digest: str
     config_digest: str | None
+    dominance_evidence: tuple[DominanceEvidence, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -304,9 +418,22 @@ class AnalysisResult:
                              "predicate": asdict(access.predicate),
                              "source": asdict(access.policy_source),
                              "policy_reference": asdict(access.policy_reference),
+                             "access_kind": access.access_kind, "access_object": access.access_object,
+                             "event_index": access.event_index,
+                             "proof_basis": access.proof_basis,
                              "graph_digest": self.graph_digest, "config_digest": self.config_digest,
                              "model_assessment": access.assessment.value,
                              "unresolved": list(access.unresolved)})
+            if access.file is not None:
+                evidence[-1]["file"] = access.file
+            if access.line is not None:
+                evidence[-1]["line"] = access.line
+            if access.proof_basis == "reviewed_source_cfg":
+                evidence[-1]["dominance_evidence"] = [asdict(d) for d in self.dominance_evidence
+                    if d.policy.root == access.root and d.policy.function == access.function
+                    and d.policy.rule_id == access.rule_id and d.policy.predicate == access.predicate
+                    and d.policy.field == access.field and d.policy.access_kind == access.access_kind
+                    and d.policy.access_object == access.access_object and d.access_index == access.event_index]
             findings.append({"kfunc": access.root, "invariant": "I3", "verdict": "unknown",
                              "enforcement": ["unknown"], "static_or_runtime": "unknown",
                              "path": list(access.path), "evidence": evidence,
@@ -314,12 +441,14 @@ class AnalysisResult:
                                             + access.explanation})
         for gap in self.gaps:
             findings.append({"kfunc": gap.root, "invariant": "I3", "verdict": "unknown",
-                             "enforcement": ["unknown"], "path": list(gap.path),
+                             "enforcement": ["unknown"], "static_or_runtime": "unknown", "path": list(gap.path),
                              "evidence": [{"function": gap.function, "detail": gap.reason,
                                            "source": asdict(self.source) if self.source is not None else None,
                                            "graph_digest": self.graph_digest,
                                            "config_digest": self.config_digest}],
                              "explanation": gap.reason})
+        validate("findings", {"kernel_version": self.source.version if self.source else "unknown",
+                              "findings": findings})
         return findings
 
 
@@ -387,6 +516,7 @@ class _Analyzer:
         self.max_depth, self.max_work, self.work = max_depth, max_work, 0
         self.models = {f.function: f for f in model.functions} if model is not None else {}
         self.guards = {(g.function, g.event_index): g for g in model.guards} if model is not None else {}
+        self.dominance = {(d.policy, d.access_index): d for d in model.dominance} if model is not None else {}
         predicates = {p.predicate for p in policies} | {g.predicate for g in self.guards.values()}
         predicates.update(e.predicate for e in entries)
         baseline = _State(tuple(_Fact(p) for p in sorted(predicates)))
@@ -402,6 +532,7 @@ class _Analyzer:
             self.initial[root] = state
         self.accesses: list[AccessAssessment] = []
         self.gaps: list[AnalysisGap] = []
+        self.assessed: set[GuardPolicy] = set()
 
     def spend(self, state: _State) -> None:
         if self.work >= self.max_work:
@@ -416,6 +547,121 @@ class _Analyzer:
     def uncertain(self, root: str, path: tuple[str, ...], state: _State, reason: str) -> _State:
         self.gap(root, path, reason)
         return state.forget(reason, taint=True)
+
+    def prove_dominance(self, proof: DominanceEvidence, state: _State) -> tuple[Truth, str]:
+        """All-path validation through a reviewed DAG; never infer CFG from order.
+
+        This proves only a local conditional property: if this exact source
+        access is reached, its guard passed and its predicate/bindings persisted.
+        It does not repair the invocation state or certify unvisited functions.
+        """
+        self.spend(state)
+        policy = proof.policy
+        fm = self.models.get(policy.function)
+        if self.model is None or not self.model.bindings_verified or fm is None or not fm.complete_events:
+            return Truth.UNKNOWN, "dominance lacks verified bindings or complete function events"
+        if any(reason in state.issues for reason in ("recursive call cycle", "maximum call depth reached",
+                                                     "unconfirmed direct call or indirect call")):
+            return Truth.UNKNOWN, "dominance cannot discharge recursive/depth/indirect traversal gaps"
+        if self.graph.get("illustrative", False) and not self.model.synthetic:
+            return Truth.UNKNOWN, "illustrative graph cannot establish source dominance"
+        if not self.model.synthetic and self.model.config_digest is None and not proof.configuration_independent:
+            return Truth.UNKNOWN, "dominance lacks build provenance or reviewed configuration-independent scope"
+        node = self.graph["nodes"][policy.function]
+        events = node["events"]
+        count = len(events)
+        successors: list[list[ControlEdge]] = [[] for _ in events]
+        incoming_count = [0] * count
+        for edge in proof.edges:
+            self.spend(state)
+            successors[edge.origin].append(edge)
+            if edge.target is not None:
+                incoming_count[edge.target] += 1
+        if incoming_count[proof.entry_index]:
+            return Truth.UNKNOWN, "reviewed CFG entry has an incoming edge"
+        for index, event in enumerate(events):
+            self.spend(state)
+            outgoing = successors[index]
+            if event["kind"] == "guard":
+                if len(outgoing) != 2 or {e.outcome for e in outgoing} != {Truth.TRUE, Truth.FALSE}:
+                    return Truth.UNKNOWN, "reviewed CFG does not cover both guard outcomes"
+            elif len(outgoing) != 1 or outgoing[0].outcome is not Truth.UNKNOWN:
+                return Truth.UNKNOWN, "reviewed CFG lacks an explicit ordinary-event continuation/exit"
+        # Reject cycles, including ones outside the candidate's apparent prefix.
+        # They may invalidate a predicate before a later visit to the same write.
+        ready = [i for i, degree in enumerate(incoming_count) if degree == 0]
+        order = []
+        while ready:
+            self.spend(state)
+            index = heappop(ready)
+            order.append(index)
+            for edge in successors[index]:
+                self.spend(state)
+                if edge.target is not None:
+                    incoming_count[edge.target] -= 1
+                    if incoming_count[edge.target] == 0:
+                        heappush(ready, edge.target)
+        if len(order) != count:
+            return Truth.UNKNOWN, "cyclic dominance CFG needs an unsupported fixed point"
+        # Check metadata independently of the supplied CFG. A reviewed diagram
+        # cannot silently erase unsequenced calls/writes from the actual input.
+        call_sites: dict[str, set[int | None]] = {}
+        written = set()
+        for event in events:
+            self.spend(state)
+            if event["kind"] == "call":
+                call_sites.setdefault(event.get("target", ""), set()).add(event.get("line"))
+            if event["kind"] in ("write", "atomic"):
+                written.add(event.get("field"))
+        for edge in node["callees"]:
+            self.spend(state)
+            locations = call_sites.get(edge["target"], set())
+            if not locations or ("line" in edge and None not in locations and edge["line"] not in locations):
+                return Truth.UNKNOWN, "dominance input contains an unsequenced callee"
+        for field in node.get("writes", []):
+            self.spend(state)
+            if field not in written:
+                return Truth.UNKNOWN, "dominance input contains an unsequenced write"
+        preserved = {p.event_index for p in proof.preserves}
+        guard = self.guards[(policy.function, proof.guard_index)]
+        # UNKNOWN means the successful-check token is absent on at least one
+        # reaching path, not that the actual predicate is false.
+        reaching: dict[int, list[Truth]] = {proof.entry_index: [Truth.UNKNOWN]}
+        for index in order:
+            self.spend(state)
+            if index not in reaching:
+                continue
+            values = reaching[index]
+            for _ in values:
+                self.spend(state)
+            value = Truth.TRUE if all(v is Truth.TRUE for v in values) else Truth.UNKNOWN
+            if index == proof.access_index:
+                return value, ("all reviewed entry-to-access paths pass the guard with preserved predicate/object identities"
+                               if value is Truth.TRUE else
+                               "a reviewed path bypasses the successful guard or lacks predicate/object preservation")
+            if index != proof.guard_index and index in preserved and events[index]["kind"] == "call":
+                event = events[index]
+                matches = []
+                for edge in node["callees"]:
+                    self.spend(state)
+                    if (edge["target"] == event.get("target") and
+                            ("line" not in edge or "line" not in event or edge["line"] == event["line"])):
+                        matches.append(edge)
+                if (len(matches) != 1 or matches[0]["kind"] != "direct"
+                        or event.get("target") not in self.graph["nodes"]):
+                    return Truth.UNKNOWN, "dominance preservation crosses an unconfirmed/indirect call"
+            for edge in successors[index]:
+                self.spend(state)
+                if edge.target is None:
+                    continue
+                if index == proof.guard_index:
+                    tested = (guard.condition_true_means if edge.outcome is Truth.TRUE else
+                              _opposite(guard.condition_true_means))
+                    outgoing = Truth.TRUE if tested is Truth.TRUE else Truth.UNKNOWN
+                else:
+                    outgoing = value if index in preserved else Truth.UNKNOWN
+                reaching.setdefault(edge.target, []).append(outgoing)
+        return Truth.UNKNOWN, "access is unreachable in the reviewed CFG; no observed access established"
 
     def assess(self, root: str, path: tuple[str, ...], policy: GuardPolicy, state: _State,
                index: int | None, event: dict) -> None:
@@ -437,10 +683,48 @@ class _Analyzer:
             Assessment.MISSING: "Complete modeled path has no established check/precondition; actual predicate value unknown.",
             Assessment.UNKNOWN: "Insufficient evidence to establish predicate or check coverage.",
         }
+        evidence, explanation, basis = fact.evidence, explanations[assessment], "ordered_events"
+        proof = self.dominance.get((policy, index))
+        if proof is not None:
+            value, reason = self.prove_dominance(proof, state)
+            basis = "reviewed_source_cfg"
+            refs = (proof.reference, self.guards[(policy.function, proof.guard_index)].reference,
+                    *proof.stability_references)
+            evidence = tuple(Evidence(ref.symbol, "reviewed local dominance: " + proof.rationale,
+                                      path, ref.file, ref.line, ref.end_line) for ref in dict.fromkeys(refs))
+            observed = value
+            if value is Truth.TRUE:
+                assessment, issues = Assessment.ESTABLISHED, ()
+                explanation = ("Local source-CFG dominance established at this possibly reached access; "
+                               "caller/whole-root coverage is not certified. " + reason)
+            else:
+                assessment, issues = Assessment.UNKNOWN, (reason,)
+                explanation = "Reviewed dominance evidence is insufficient: " + reason
+                self.gap(root, path, reason)
+        line = event.get("line", policy.access_line if index is None else None)
         self.accesses.append(AccessAssessment(root, path, path[-1], node.get("file"),
-            event.get("line"), index, policy.field, policy.rule_id, policy.source,
+            line, index, policy.field, policy.rule_id, policy.source,
             policy.reference, policy.predicate,
-            observed, assessment, explanations[assessment], fact.evidence, issues))
+            observed, assessment, explanation, evidence, issues,
+            policy.access_kind, policy.access_object, basis))
+        self.assessed.add(policy)
+
+    def report_unassessed(self) -> None:
+        """Coverage rows describe configured obligations, never invented paths."""
+        for policy in self.policies:
+            if policy in self.assessed:
+                continue
+            reason = (f"Configured obligation {policy.rule_id} for {policy.function}:{policy.access_line} "
+                      "was not reached or assessed; no access path or successful coverage established.")
+            path = (policy.root,)
+            self.gap(policy.root, path, reason)
+            node = self.graph["nodes"][policy.function]
+            self.accesses.append(AccessAssessment(
+                policy.root, path, policy.function, node.get("file"), policy.access_line, None,
+                policy.field, policy.rule_id, policy.source, policy.reference, policy.predicate,
+                Truth.UNKNOWN, Assessment.UNKNOWN, reason, (), (reason,), policy.access_kind,
+                policy.access_object, "unassessed_obligation",
+            ))
 
     def cut(self, root: str, path: tuple[str, ...], state: _State, reason: str) -> _State:
         self.gap(root, path, reason)
@@ -603,7 +887,9 @@ def analyze(callgraph: dict[str, Any], policies: tuple[GuardPolicy, ...], *,
         raise ValueError("callgraph roots missing from nodes")
     if any(p.root not in roots for p in policies):
         raise ValueError("policy root is not a callgraph root")
-    if len({(p.rule_id, p.root, p.function, p.field, p.access_kind, p.access_line, p.predicate)
+    if any(p.function not in callgraph["nodes"] for p in policies):
+        raise ValueError("policy function is not a callgraph node")
+    if len({(p.rule_id, p.root, p.function, p.field, p.access_kind, p.access_line, p.access_object, p.predicate)
             for p in policies}) != len(policies):
         raise ValueError("duplicate guard policy")
     if any(e.root not in roots for e in entries):
@@ -641,14 +927,55 @@ def analyze(callgraph: dict[str, Any], policies: tuple[GuardPolicy, ...], *,
                     or event.get("action") != guard.action or node.get("file") != guard.reference.file
                     or ("line" in event and not guard.reference.line <= event["line"] <= guard.reference.end_line)):
                 raise ValueError("guard annotation does not match exact event/source")
+        guards = {(g.function, g.event_index): g for g in model.guards}
+        functions = {f.function: f for f in model.functions}
+        for proof in model.dominance:
+            p = proof.policy
+            if proof.graph_digest != model.graph_digest:
+                raise ValueError("dominance graph fingerprint mismatch")
+            if p not in policies:
+                raise ValueError("dominance evidence does not match a configured policy")
+            node = callgraph["nodes"][p.function]
+            events = node.get("events", [])
+            if node["kind"] in ("boundary", "external") or proof.entry_index != 0:
+                raise ValueError("dominance requires a defined function and its event-zero entry")
+            if max(proof.guard_index, proof.access_index) >= len(events):
+                raise ValueError("dominance event missing")
+            guard = guards.get((p.function, proof.guard_index))
+            if guard is None or guard.predicate != p.predicate:
+                raise ValueError("dominance guard does not match the exact policy predicate/objects")
+            access = events[proof.access_index]
+            if (access["kind"] != p.access_kind or access.get("field") != p.field
+                    or access.get("line") != p.access_line):
+                raise ValueError("dominance access does not match the exact policy site/kind")
+            fm = functions.get(p.function)
+            if (node.get("file") != proof.reference.file
+                    or (fm is not None and fm.reference != proof.reference)
+                    or any("line" not in e or not proof.reference.line <= e["line"] <= proof.reference.end_line
+                           for e in events)):
+                raise ValueError("dominance function/event source range mismatch")
+            for edge in proof.edges:
+                if edge.origin >= len(events) or (edge.target is not None and edge.target >= len(events)):
+                    raise ValueError("dominance CFG edge references a missing event")
+            for preservation in proof.preserves:
+                if preservation.event_index >= len(events):
+                    raise ValueError("preservation event missing")
+                ref = preservation.reference
+                event = events[preservation.event_index]
+                if (ref.symbol != p.function or ref.file != node.get("file")
+                        or not ref.line <= event["line"] <= ref.end_line):
+                    raise ValueError("preservation evidence source location mismatch")
     # Snapshot inputs; function invocations have copied immutable abstract states.
     graph = json.loads(json.dumps(callgraph, allow_nan=False))
     ordered = tuple(sorted(policies, key=lambda p: (p.root, p.function, p.field, p.rule_id,
-                                                  p.access_kind, p.access_line or 0, p.predicate)))
+                                                   p.access_kind, p.access_line or 0, p.predicate,
+                                                   p.access_object or "")))
     engine = _Analyzer(graph, ordered, model, entries, max_depth, max_work)
     for root in sorted(roots):
         engine.visit(root, (root,), engine.initial[root])
+    engine.report_unassessed()
     return AnalysisResult(tuple(engine.accesses), tuple(engine.gaps), engine.work,
                           model.source if model is not None else None,
                           model.synthetic if model is not None else False,
-                          graph_digest(graph), model.config_digest if model is not None else None)
+                          graph_digest(graph), model.config_digest if model is not None else None,
+                          model.dominance if model is not None else ())

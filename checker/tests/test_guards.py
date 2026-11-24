@@ -11,8 +11,8 @@ import jsonschema
 from checker import runner
 from checker.checkers import registered
 from checker.guards import (
-    Assessment, BranchWhen, EntryFact, FunctionModel, GuardPolicy, GuardSemantics,
-    Model, Predicate, Source, SourceReference, Truth, analyze, graph_digest,
+    Assessment, BranchWhen, ControlEdge, DominanceEvidence, EntryFact, FunctionModel, GuardPolicy, GuardSemantics,
+    Model, Predicate, PredicatePreservation, Source, SourceReference, Truth, analyze, graph_digest,
 )
 
 
@@ -105,9 +105,10 @@ class GuardTransferTests(unittest.TestCase):
                     g = graph([guard_event(condition), write()])
                     result = run(g, guards=[semantics(condition=condition,
                         condition_true_means=meaning, branch_when=sense)], entry_facts=facts)
-                    self.assertEqual(1 if reached else 0, len(result.accesses))
+                    observed = [a for a in result.accesses if a.event_index is not None]
+                    self.assertEqual(1 if reached else 0, len(observed))
                     if reached:
-                        access = result.accesses[0]
+                        access = observed[0]
                         self.assertEqual("true" if reached == {True} else "false", access.observed.value)
                         self.assertEqual("established" if reached == {True} else "false", access.assessment.value)
 
@@ -187,7 +188,10 @@ class GuardTransferTests(unittest.TestCase):
 
     def test_atomic_needs_its_own_explicit_policy(self):
         g = graph([guard_event(), {"kind": "atomic", "field": FIELD, "op": "cmpxchg"}])
-        self.assertEqual((), run(g, guards=[semantics()]).accesses)
+        missing = run(g, guards=[semantics()]).accesses[0]
+        self.assertIsNone(missing.event_index)
+        self.assertIs(missing.assessment, Assessment.UNKNOWN)
+        self.assertEqual("write", missing.access_kind)
         access = run(g, [policy(access_kind="atomic")], [semantics()]).accesses[0]
         self.assertIs(access.assessment, Assessment.ESTABLISHED)
 
@@ -218,7 +222,7 @@ class GuardTransferTests(unittest.TestCase):
         g = graph([guard_event(), guard_event(positive), write()])
         result = run(g, guards=[semantics(), semantics(index=1, condition=positive,
                                                      condition_true_means=Truth.TRUE)])
-        self.assertEqual((), result.accesses)
+        self.assertTrue(all(a.event_index is None and a.assessment is Assessment.UNKNOWN for a in result.accesses))
 
     def test_unproven_context_cannot_prune_writes_using_inferred_facts(self):
         positive = "ops_cpu_valid(cpu)"
@@ -345,7 +349,10 @@ class InterproceduralGuardTests(unittest.TestCase):
         g = graph([guard_event(), call(), write()], {"helper": node([write()])},
                   [{"target": "helper", "kind": "indirect"}])
         result = run(g, [policy(), policy(function="helper")], [semantics()])
-        self.assertEqual(["root"], [a.function for a in result.accesses])
+        self.assertEqual(["root"], [a.function for a in result.accesses if a.event_index is not None])
+        missing = next(a for a in result.accesses if a.function == "helper")
+        self.assertIsNone(missing.event_index)
+        self.assertIs(missing.assessment, Assessment.UNKNOWN)
         self.assertIs(result.accesses[0].assessment, Assessment.UNKNOWN)
         self.assertTrue(result.gaps)
 
@@ -483,7 +490,9 @@ class GuardInputTests(unittest.TestCase):
     def test_unidentified_atomic_does_not_apply_an_ordinary_write_policy(self):
         g = graph([{"kind": "atomic"}])
         result = run(g)
-        self.assertEqual((), result.accesses)
+        self.assertEqual(1, len(result.accesses))
+        self.assertIsNone(result.accesses[0].event_index)
+        self.assertEqual("write", result.accesses[0].access_kind)
         self.assertTrue(result.gaps)
         atomic = run(g, [policy(access_kind="atomic")])
         self.assertEqual(1, len(atomic.accesses))
@@ -497,7 +506,9 @@ class GuardInputTests(unittest.TestCase):
     def test_incomplete_empty_stream_has_an_explicit_unknown_gap(self):
         g = graph()
         result = run(g, model=model_for(g, functions=[FunctionModel("root", REF)]))
-        self.assertEqual((), result.accesses)
+        self.assertEqual(1, len(result.accesses))
+        self.assertIs(result.accesses[0].assessment, Assessment.UNKNOWN)
+        self.assertIsNone(result.accesses[0].event_index)
         self.assertTrue(any("completeness" in gap.reason for gap in result.gaps))
         self.assertTrue(all(f["verdict"] == "unknown" for f in result.to_findings()))
 
@@ -510,7 +521,11 @@ class GuardInputTests(unittest.TestCase):
 
     def test_policy_applies_only_to_explicit_field_function_and_root(self):
         g = graph([write("rq.other_state"), call()], {"helper": node([write()])}, ["helper"])
-        self.assertEqual((), run(g).accesses)
+        coverage = run(g).accesses
+        self.assertEqual(1, len(coverage))
+        self.assertIsNone(coverage[0].event_index)
+        self.assertIs(coverage[0].assessment, Assessment.UNKNOWN)
+        self.assertEqual("root", coverage[0].function)
 
     def test_source_version_mismatch_fails_explicitly(self):
         g = graph([write()])
@@ -718,6 +733,383 @@ class GuardInputTests(unittest.TestCase):
         result = analyze(g, [p])
         self.assertTrue(result.accesses)
         self.assertTrue(all(a.assessment is Assessment.UNKNOWN for a in result.accesses))
+
+
+class MissingObligationTests(unittest.TestCase):
+    def test_policy_function_typo_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "policy function"):
+            run(graph(), [policy(function="roott")])
+
+    def test_unreachable_existing_function_gets_one_explicit_unknown(self):
+        g = graph(nodes={"helper": node([write(line=9)])})
+        p = policy(function="helper", access_line=9, access_object="rq:helper")
+        result = run(g, [p])
+        self.assertEqual(1, len(result.accesses))
+        row = result.accesses[0]
+        self.assertEqual(("helper", FIELD, 9, "rq:helper"), (row.function, row.field, row.line, row.access_object))
+        self.assertEqual(("root",), row.path)  # No invented root -> helper call.
+        self.assertIsNone(row.event_index)
+        self.assertIs(row.assessment, Assessment.UNKNOWN)
+        self.assertEqual("unassessed_obligation", row.proof_basis)
+        self.assertTrue(result.to_findings())
+
+    def test_indirect_helper_policy_cannot_disappear(self):
+        g = graph([call()], {"helper": node([write()])}, [{"target": "helper", "kind": "indirect"}])
+        result = run(g, [policy(function="helper")])
+        self.assertEqual(1, len(result.accesses))
+        self.assertIs(result.accesses[0].assessment, Assessment.UNKNOWN)
+        self.assertIsNone(result.accesses[0].event_index)
+        self.assertTrue(any("not reached or assessed" in gap.reason for gap in result.gaps))
+
+    def test_descendant_policy_survives_a_depth_or_work_cut_in_ancestor(self):
+        g = graph([call("a")], {"a": node([call("helper")], ["helper"]), "helper": node([write()])}, ["a"])
+        for limits in ({"max_work": 1}, {"max_depth": 0}):
+            with self.subTest(limits=limits):
+                result = run(g, [policy(function="helper")], **limits)
+                self.assertEqual(1, len(result.accesses))
+                self.assertIs(result.accesses[0].assessment, Assessment.UNKNOWN)
+                self.assertEqual(("root",), result.accesses[0].path)
+
+    def test_unassessed_rows_are_per_predicate_root_site_and_object(self):
+        g = graph(nodes={"helper": node()})
+        policies = [policy(function="helper", predicate=CPU, access_line=5, access_object="rq:a"),
+                    policy(function="helper", predicate=OTHER_CPU, access_line=6, access_object="rq:b"),
+                    policy(function="helper", predicate=AFFINITY, access_kind="atomic", access_line=7,
+                           access_object="rq:a")]
+        result = run(g, policies)
+        self.assertEqual(3, len(result.accesses))
+        self.assertEqual({(p.predicate, p.access_line, p.access_object, p.access_kind) for p in policies},
+                         {(a.predicate, a.line, a.access_object, a.access_kind) for a in result.accesses})
+        self.assertTrue(all(a.assessment is Assessment.UNKNOWN and a.event_index is None for a in result.accesses))
+        runner.validate("findings", {"kernel_version": SOURCE.version, "findings": result.to_findings()})
+
+    def test_covered_policy_does_not_gain_a_duplicate_unassessed_row(self):
+        result = run(graph([guard_event(), write()]), guards=[semantics()])
+        self.assertEqual(1, len(result.accesses))
+        self.assertEqual(1, result.accesses[0].event_index)
+
+    def test_budget_cut_retains_intended_site_and_object_in_findings(self):
+        p = policy(access_line=9, access_object="rq:argument-1", access_kind="atomic")
+        result = run(graph([{"kind": "atomic", "field": FIELD, "line": 9}]), [p], max_work=1)
+        row = result.accesses[0]
+        self.assertIs(row.assessment, Assessment.UNKNOWN)
+        self.assertIsNone(row.event_index)
+        self.assertEqual((9, "rq:argument-1", "atomic"), (row.line, row.access_object, row.access_kind))
+        evidence = result.to_findings()[0]["evidence"][-1]
+        self.assertEqual(("synthetic.c", 9, None), (evidence["file"], evidence["line"], evidence["event_index"]))
+
+
+class DominanceTests(unittest.TestCase):
+    def case(self, middle=None):
+        middle = {"kind": "error", "line": 3} if middle is None else middle
+        events = [guard_event(line=1), guard_event("choose_side", "continue", line=2),
+                  middle, write("rq.other_state", line=4), write(line=5)]
+        others, callees = {}, []
+        if middle["kind"] == "call":
+            others["opaque"] = node(kind="boundary")
+            callees = [{"target": "opaque", "kind": "direct", "line": 3}]
+        g = graph(events, others, callees)
+        p = policy(access_line=5, access_object="rq:argument-0")
+        edges = (ControlEdge(0, None, Truth.TRUE), ControlEdge(0, 1, Truth.FALSE),
+                 ControlEdge(1, 2, Truth.TRUE), ControlEdge(1, 4, Truth.FALSE),
+                 ControlEdge(2, 3), ControlEdge(3, 4), ControlEdge(4, None))
+        preserves = tuple(PredicatePreservation(i, REF, "synthetic operation preserves CPU and fixed rq identity")
+                          for i in (1, 2, 3))
+        proof = DominanceEvidence(p, graph_digest(g), 0, 4, edges, preserves,
+                                  ((CPU.objects[0], "cpu"), (p.access_object, "rq")), REF, (REF,),
+                                  "explicit synthetic CFG; returning invalid guard, two source branches, stable value")
+        functions = tuple(FunctionModel(f, replace(REF, symbol=f), True, f != "root") for f in sorted(g["nodes"]))
+        m = model_for(g, [semantics()], functions=functions, dominance=(proof,))
+        return g, p, m
+
+    def assessment(self, g, p, m, **kwargs):
+        return analyze(g, (p,), model=m, **kwargs).accesses[0]
+
+    def test_branched_cfg_positive_against_independent_concrete_paths(self):
+        seen = []
+        for valid in (False, True):
+            for choose_side in (False, True):
+                if not valid:
+                    continue  # Real early-return semantics of the synthetic reference program.
+                if choose_side:
+                    other_state = 1  # Diagnostic and unrelated write do not change the tested CPU value.
+                    self.assertEqual(1, other_state)
+                seen.append(valid)
+        self.assertEqual([True, True], seen)
+        g, p, m = self.case()
+        self.assertFalse(next(f for f in m.functions if f.function == "root").linear_except_guards)
+        row = self.assessment(g, p, m)
+        self.assertIs(row.assessment, Assessment.ESTABLISHED)
+        self.assertEqual("reviewed_source_cfg", row.proof_basis)
+
+    def test_source_order_without_cfg_does_not_establish_dominance(self):
+        g, p, m = self.case()
+        self.assertIs(self.assessment(g, p, replace(m, dominance=())).assessment, Assessment.UNKNOWN)
+
+    def test_guard_failure_reaching_access_prevents_a_positive(self):
+        g, p, m = self.case()
+        d = m.dominance[0]
+        edges = tuple(replace(e, target=4) if e.origin == 0 and e.outcome is Truth.TRUE else e for e in d.edges)
+        row = self.assessment(g, p, replace(m, dominance=(replace(d, edges=edges),)))
+        self.assertIs(row.assessment, Assessment.UNKNOWN)
+
+    def test_a_path_bypassing_the_guard_prevents_a_positive(self):
+        g, p, m = self.case()
+        d = m.dominance[0]
+        g["nodes"]["root"]["events"].insert(0, guard_event("bypass", "continue", line=1))
+        edges = tuple(ControlEdge(e.origin + 1, None if e.target is None else e.target + 1, e.outcome)
+                      for e in d.edges) + (ControlEdge(0, 5, Truth.TRUE), ControlEdge(0, 1, Truth.FALSE))
+        proof = replace(d, graph_digest=graph_digest(g), guard_index=1, access_index=5, edges=edges,
+                        preserves=tuple(replace(v, event_index=v.event_index + 1) for v in d.preserves))
+        m = replace(m, graph_digest=graph_digest(g), guards=(semantics(index=1),), dominance=(proof,))
+        self.assertIs(self.assessment(g, p, m).assessment, Assessment.UNKNOWN)
+
+    def test_wrong_polarity_does_not_become_a_dominance_proof(self):
+        g, p, m = self.case()
+        self.assertIs(self.assessment(g, p, replace(m, guards=(semantics(condition_true_means=Truth.TRUE),))).assessment,
+                      Assessment.UNKNOWN)
+
+    def test_guard_then_branch_without_function_exit_is_supported_locally(self):
+        g, p, m = self.case()
+        # if (valid) { ... write(); } after(); -- neither guard edge returns.
+        events = g["nodes"]["root"]["events"]
+        events[0] = guard_event(CPU.expression, "continue", line=1)
+        events.append({"kind": "warn", "line": 6})
+        d = m.dominance[0]
+        edges = tuple(e for e in d.edges if e.origin not in (0, 4)) + (
+            ControlEdge(0, 1, Truth.TRUE), ControlEdge(0, 5, Truth.FALSE),
+            ControlEdge(4, 5), ControlEdge(5, None))
+        proof = replace(d, graph_digest=graph_digest(g), edges=edges)
+        annotation = semantics(condition=CPU.expression, action="continue",
+                               condition_true_means=Truth.TRUE, exits_function=False)
+        m = replace(m, graph_digest=graph_digest(g), guards=(annotation,), dominance=(proof,))
+        self.assertIs(self.assessment(g, p, m).assessment, Assessment.ESTABLISHED)
+
+    def test_unknown_effect_on_one_reaching_branch_invalidates_the_proof(self):
+        g, p, m = self.case()
+        d = m.dominance[0]
+        for missing in (1, 2, 3):
+            with self.subTest(event=missing):
+                proof = replace(d, preserves=tuple(v for v in d.preserves if v.event_index != missing))
+                self.assertIs(self.assessment(g, p, replace(m, dominance=(proof,))).assessment, Assessment.UNKNOWN)
+
+    def test_opaque_call_needs_specific_preservation_evidence(self):
+        g, p, m = self.case(call("opaque", line=3))
+        self.assertIs(self.assessment(g, p, m).assessment, Assessment.ESTABLISHED)
+        d = m.dominance[0]
+        proof = replace(d, preserves=tuple(v for v in d.preserves if v.event_index != 2))
+        self.assertIs(self.assessment(g, p, replace(m, dominance=(proof,))).assessment, Assessment.UNKNOWN)
+
+    def test_indirect_or_missing_call_cannot_be_certified_by_a_preservation_label(self):
+        for missing in (False, True):
+            g, p, m = self.case(call("opaque", line=3))
+            if missing:
+                del g["nodes"]["opaque"]
+            else:
+                g["nodes"]["root"]["callees"][0]["kind"] = "indirect"
+            proof = replace(m.dominance[0], graph_digest=graph_digest(g))
+            m = replace(m, graph_digest=graph_digest(g), dominance=(proof,),
+                        functions=tuple(f for f in m.functions if f.function in g["nodes"]))
+            self.assertIs(self.assessment(g, p, m).assessment, Assessment.UNKNOWN)
+
+    def test_cycle_in_the_reviewed_cfg_is_unknown(self):
+        g, p, m = self.case()
+        d = m.dominance[0]
+        edges = tuple(replace(e, target=1) if e.origin == 3 else e for e in d.edges)
+        self.assertIs(self.assessment(g, p, replace(m, dominance=(replace(d, edges=edges),))).assessment,
+                      Assessment.UNKNOWN)
+
+    def test_missing_branch_or_continuation_is_unknown(self):
+        g, p, m = self.case()
+        d = m.dominance[0]
+        for origin in (0, 1, 2):
+            with self.subTest(origin=origin):
+                proof = replace(d, edges=tuple(e for e in d.edges if e.origin != origin))
+                self.assertIs(self.assessment(g, p, replace(m, dominance=(proof,))).assessment, Assessment.UNKNOWN)
+
+    def test_known_source_lines_do_not_override_unsequenced_metadata(self):
+        g, p, m = self.case()
+        g["nodes"]["root"]["writes"] = ["rq.unsequenced"]
+        proof = replace(m.dominance[0], graph_digest=graph_digest(g))
+        m = replace(m, graph_digest=graph_digest(g), dominance=(proof,))
+        self.assertIs(self.assessment(g, p, m).assessment, Assessment.UNKNOWN)
+
+    def test_missing_bindings_or_completeness_remains_unknown(self):
+        g, p, m = self.case()
+        for changed in (replace(m, bindings_verified=False),
+                        replace(m, functions=(FunctionModel("root", REF, False, False),))):
+            self.assertIs(self.assessment(g, p, changed).assessment, Assessment.UNKNOWN)
+
+    def test_no_fake_config_digest_is_needed_for_a_reviewed_source_relation(self):
+        g, p, m = self.case()
+        g["illustrative"] = False
+        d = replace(m.dominance[0], graph_digest=graph_digest(g))
+        m = replace(m, graph_digest=graph_digest(g), synthetic=False, dominance=(d,))
+        self.assertIs(self.assessment(g, p, m).assessment, Assessment.UNKNOWN)
+        m = replace(m, dominance=(replace(d, configuration_independent=True),))
+        self.assertIsNone(m.config_digest)
+        self.assertIs(self.assessment(g, p, m).assessment, Assessment.ESTABLISHED)
+
+    def test_illustrative_graph_cannot_be_promoted_by_a_real_source_proof(self):
+        g, p, m = self.case()
+        m = replace(m, synthetic=False, dominance=(replace(m.dominance[0], configuration_independent=True),))
+        self.assertIs(self.assessment(g, p, m).assessment, Assessment.UNKNOWN)
+
+    def test_graph_digest_cannot_be_refreshed_without_rebinding_the_proof(self):
+        g, p, m = self.case()
+        g["nodes"]["root"]["events"][2]["msg"] = "different operation"
+        with self.assertRaisesRegex(ValueError, "dominance graph fingerprint"):
+            self.assessment(g, p, replace(m, graph_digest=graph_digest(g)))
+
+    def test_wrong_policy_object_and_guard_predicate_are_rejected(self):
+        g, p, m = self.case()
+        with self.assertRaisesRegex(ValueError, "configured policy"):
+            self.assessment(g, replace(p, access_object="rq:other"), m)
+        with self.assertRaisesRegex(ValueError, "predicate/objects"):
+            self.assessment(g, p, replace(m, guards=(semantics(predicate=OTHER_CPU),)))
+        with self.assertRaisesRegex(ValueError, "every exact"):
+            replace(m.dominance[0], object_bindings=((CPU.objects[0], "cpu"),))
+
+    def test_exact_access_kind_site_and_source_are_required(self):
+        g, p, m = self.case()
+        d = m.dominance[0]
+        for change in ({"access_index": 3}, {"access_index": 100},
+                       {"reference": replace(REF, file="wrong.c")}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.assessment(g, p, replace(m, dominance=(replace(d, **change),)))
+        with self.assertRaises(ValueError):
+            replace(d, policy=replace(p, access_line=None))
+
+    def test_proof_source_version_and_commit_mismatch_fail_loudly(self):
+        g, p, m = self.case()
+        for source in (Source("different", SOURCE.commit), Source(SOURCE.version, "1" * 40)):
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, "mismatch"):
+                self.assessment(g, p, replace(m, source=source))
+
+    def test_early_budget_cuts_cannot_complete_a_partial_dominance_proof(self):
+        g, p, m = self.case()
+        for budget in range(1, 16):
+            with self.subTest(budget=budget):
+                result = analyze(g, (p,), model=m, max_work=budget)
+                self.assertLessEqual(result.work_used, budget)
+                self.assertTrue(result.accesses)
+                self.assertTrue(all(a.assessment is Assessment.UNKNOWN for a in result.accesses))
+
+    def test_dominance_does_not_discharge_a_different_required_predicate(self):
+        g, p, m = self.case()
+        other = replace(p, predicate=AFFINITY)
+        result = analyze(g, (p, other), model=m)
+        self.assertEqual({CPU: Assessment.ESTABLISHED, AFFINITY: Assessment.UNKNOWN},
+                         {a.predicate: a.assessment for a in result.accesses})
+
+    def test_local_dominance_does_not_export_predicate_to_caller(self):
+        g, p, m = self.case()
+        g["roots"] = ["outer"]
+        g["nodes"]["outer"] = node([call("root"), write(line=8)], ["root"], kind="kfunc")
+        p = replace(p, root="outer")
+        caller = policy(root="outer", function="outer", access_line=8, access_object="rq:caller")
+        proof = replace(m.dominance[0], policy=p, graph_digest=graph_digest(g))
+        m = replace(m, graph_digest=graph_digest(g), dominance=(proof,),
+                    functions=(*m.functions, FunctionModel("outer", replace(REF, symbol="outer"), True, True)))
+        result = analyze(g, (p, caller), model=m)
+        self.assertEqual({"root": Assessment.ESTABLISHED, "outer": Assessment.UNKNOWN},
+                         {a.function: a.assessment for a in result.accesses})
+
+    def test_proof_data_is_immutable_typed_and_serialized_deterministically(self):
+        g, p, m = self.case()
+        d = m.dominance[0]
+        first = analyze(g, (p,), model=m)
+        changed = replace(d, edges=tuple(reversed(d.edges)), preserves=tuple(reversed(d.preserves)))
+        second = analyze(g, (p,), model=replace(m, dominance=(changed,)))
+        self.assertEqual(first.to_dict(), second.to_dict())
+        with self.assertRaises(FrozenInstanceError):
+            d.access_index = 1
+        with self.assertRaises(TypeError):
+            ControlEdge(0, 1, True)
+        with self.assertRaises(ValueError):
+            replace(d, edges=(*d.edges, d.edges[0]))
+        with self.assertRaises(ValueError):
+            replace(m, dominance=(d, d))
+        findings = first.to_findings()
+        self.assertTrue(all(f["verdict"] == "unknown" for f in findings))
+        self.assertTrue(any("dominance_evidence" in e for f in findings for e in f["evidence"]))
+
+
+class SourceDominanceTests(unittest.TestCase):
+    def test_real_kick_write_is_established_without_false_linearity_attestations(self):
+        from checker.guards_demo import kick_cpu_inputs
+
+        g, policies, m = kick_cpu_inputs()
+        result = analyze(g, policies, model=m)
+        self.assertTrue(all(not f.linear_except_guards for f in m.functions))
+        self.assertIsNone(m.config_digest)
+        self.assertFalse(m.synthetic)
+        self.assertEqual("8cd9520d35a6c38db6567e97dd93b1f11f185dc6", m.source.commit)
+        row = result.accesses[0]
+        self.assertEqual(("scx_kick_cpu", 8921, "rq.scx.cpus_to_kick", "atomic", "rq:calling_cpu"),
+                         (row.function, row.line, row.field, row.access_kind, row.access_object))
+        self.assertEqual(("scx_bpf_kick_cpu", "scx_kick_cpu"), row.path)
+        self.assertIs(row.assessment, Assessment.ESTABLISHED)
+        self.assertTrue(result.gaps)  # The local theorem is not complete root/callee coverage.
+        self.assertTrue(all(f["verdict"] == "unknown" for f in result.to_findings()))
+
+    def test_pinned_source_guard_relationship_against_concrete_flag_cases(self):
+        # Independent reference program for the relevant C control, rather
+        # than traversing the supplied proof edges to generate expectations.
+        writes = []
+        for valid in (False, True):
+            for bypass in (False, True):
+                for idle in (False, True):
+                    for trylock in (False, True):
+                        for skip in (False, True):
+                            if not valid or bypass:
+                                continue
+                            if idle:
+                                if trylock and skip:
+                                    continue
+                                writes.append((8919, valid))
+                            else:
+                                writes.append((8921, valid))
+        self.assertEqual({8919, 8921}, {line for line, _ in writes})
+        self.assertEqual({True}, {valid for _, valid in writes})
+        from checker.guards_demo import kick_cpu_inputs
+
+        _, _, m = kick_cpu_inputs()
+        edges = {(e.origin, e.target, e.outcome) for e in m.dominance[0].edges}
+        self.assertIn((1, None, Truth.TRUE), edges)  # Actual invalid-CPU return.
+        self.assertIn((9, 10, Truth.UNKNOWN), edges)  # scx_error does NOT terminate.
+        self.assertIn((5, 23, Truth.TRUE), edges)  # Bypass goes through IRQ restore.
+        self.assertIn((14, 23, Truth.UNKNOWN), edges)  # Idle-skip releases rq before restore.
+
+    def test_real_example_without_dominance_or_stability_remains_unknown(self):
+        from checker.guards_demo import kick_cpu_inputs
+
+        g, policies, m = kick_cpu_inputs()
+        for model in (replace(m, dominance=()), replace(m, bindings_verified=False),
+                      replace(m, dominance=(replace(m.dominance[0], preserves=()),))):
+            with self.subTest(model=model):
+                result = analyze(g, policies, model=model)
+                self.assertTrue(all(a.assessment is Assessment.UNKNOWN for a in result.accesses))
+
+    def test_real_example_cutoffs_report_the_configured_obligation(self):
+        from checker.guards_demo import kick_cpu_inputs
+
+        g, policies, m = kick_cpu_inputs()
+        for limits in ({"max_work": 1}, {"max_work": 100}, {"max_depth": 0}, {"max_depth": 1}):
+            result = analyze(g, policies, model=m, **limits)
+            self.assertTrue(result.accesses)
+            self.assertTrue(all(a.assessment is Assessment.UNKNOWN for a in result.accesses))
+            self.assertTrue(all(a.rule_id == "I3.cpu_arg.kick_cpu" for a in result.accesses))
+
+    def test_source_demo_is_deterministic_and_retains_unknown_coverage(self):
+        from checker.guards_demo import source_demo
+
+        first = source_demo()
+        self.assertEqual(first, source_demo())
+        self.assertTrue(first["hand_provided_evidence"])
+        self.assertFalse(first["kernel_safety_claim"])
+        self.assertEqual("established", first["assessments"][0]["assessment"])
+        self.assertTrue(first["gaps"])
 
 
 if __name__ == "__main__":
