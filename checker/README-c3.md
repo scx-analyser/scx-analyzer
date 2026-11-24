@@ -28,8 +28,9 @@ used with different objects must be specialized with verified bindings, analyzed
 separately, or left UNKNOWN. One structural field name does not identify one
 runtime object across all sites.
 
-No Linux field-protection policy is installed. The demo's
-`rq.nr_running -> synthetic.rq0.lock` obligation is synthetic.
+No production Linux field-protection policy is installed. The default demo's
+`rq.nr_running -> synthetic.rq0.lock` obligation is synthetic. The opt-in
+source-helper demo below supplies its own explicit local-object policy.
 [Catalog integration design](README-c3-catalog.md) explains why callback entry
 locks and the current A3 hypotheses cannot simply become access-site policies.
 
@@ -42,7 +43,10 @@ locks and the current A3 hypotheses cannot simply become access-site policies.
 | `assert_held` / `assert_not_held` | Record MET, UNMET or UNPROVEN; never acquire/release a lock. An unmet/unproven precondition invalidates certainty. |
 | `write` / `atomic` | Evaluate only explicit policies for that access kind. |
 | Confirmed direct `call` | Analyze with the caller's current state; propagate the conservative callee exit. |
-| Guard/error/warn, conditional or unsupported lock operation | Control/effect uncertainty is sticky; later acquisitions do not recover proof of reachability. |
+| Reviewed nonterminating `warn` / `error` | Preserve existing locks; do not acquire locks or repair prior uncertainty. |
+| Reviewed guard with a returning branch | Preserve the continuing path; join unknown return/cleanup effects at function exit. |
+| Reviewed unconditional diagnostic exit | Stop the local body; caller locks/reachability remain UNKNOWN. |
+| Unannotated guard/error/warn, unresolved fallback/continue, conditional or unsupported lock operation | Control/effect uncertainty is sticky; later acquisitions do not recover proof of reachability. |
 | Missing/indirect/opaque call, recursion, depth or work limit | UNKNOWN effects with an explicit condition and the actual cut path. |
 
 Only ordered `events` determines sequence. Adjacency supplies coverage checks
@@ -53,7 +57,45 @@ two different lines. Same-line sites remain ambiguous without IDs/completeness.
 Unsequenced callees may precede any event and invalidate certainty from function
 entry. Writes in metadata without ordered accesses produce unordered UNKNOWN
 candidates (`event_index=None`, `access=None`). Missing accesses from both places
-cannot be detected. There is no CFG, path-sensitive join or reachability proof.
+cannot be detected. There is no general CFG, branch-feasibility analysis or
+arbitrary branch join. Only the reviewed early-return continuation is separated
+from the function's conservative exit join.
+
+### Reviewed control semantics
+
+The optional `analyze(..., control_semantics=(...))` input follows C4's explicit
+guard-annotation approach without importing the unmerged C4 implementation.
+`ControlSemantics.for_event(function, index, event, effect, reference, ...)`
+copies and binds the **entire** event, including condition/action/operation/message,
+to a function, event index and source range. `reference` is C2's `SourceReference`.
+Its version and commit must match the graph/provenance, its symbol/file must
+identify that function, and the event must retain its source line. Mismatches
+raise explicit errors. Non-synthetic annotations require a full commit hash.
+Annotations are serialized in the result; they are reviewed model inputs, not
+source verification performed by C3.
+
+* `ControlEffect.FALLTHROUGH`: a diagnostic's evaluation and both outcomes are
+  verified nonterminating and preserve the tracked lock identities. A WARN name,
+  or `scx_error` name, establishes neither property on its own. An aborting or
+  returning error must not be annotated FALLTHROUGH.
+* `EARLY_RETURN`: a guard has one actual returning branch and a lock-preserving
+  continuation. It needs `action: return` **and** explicit `GuardBranch` polarity.
+  C3 tracks neither predicate truth nor feasibility and derives no ownership
+  from the guard. Locks on the continuation remain usable; all possible returning
+  branches are conservatively joined to UNKNOWN at function exit, including
+  known-absent locks. A callee's continuation cannot stand for its exit effects.
+* `EXIT`: the diagnostic has no local fallthrough. Later local events are skipped.
+  Return cleanup, a possible abort and the caller's continuation are not resolved;
+  an explicit gap propagates UNKNOWN to the caller. Conditional exits require a
+  guard instead. This is not an interprocedural proof of unreachability.
+
+Unresolved fallback/continue guards cannot receive these annotations. They retain
+sticky uncertainty. `complete_events` and `linear_events` must independently
+establish completeness and linear sequencing **between** the annotated guards;
+annotations do not repair incomplete/illustrative graphs, hidden branches,
+unknown calls, failed assertions or missing identity bindings. Include condition
+evaluation, failure-path effects and cleanup in the review. Inner lexical-scope
+releases still need explicit events or must remain UNKNOWN.
 
 ## Scoped locks and function exits
 
@@ -104,8 +146,12 @@ summaries. These are not memoized universal effects.
 
 `analyze(..., max_work=10000)` sets one deterministic budget shared by **all**
 roots and callees. A unit charges function entry, ordered-event processing or
-metadata inspection/comparison. Metadata scans are charged too; the budget
-cannot be bypassed by repeated call-site coverage checks. Static policy lookups
+metadata inspection/index lookup. Each invocation indexes call locations, their
+multiplicity, edge kinds and write fields once. Coverage checks use these indexes;
+each ordered call classifies its matching edges with bounded set lookups instead
+of rescanning all edges. Duplicate metadata is folded to the same source site.
+The charged metadata work is linear in events/callee entries/distinct sites;
+sorting diagnostic keys adds deterministic ordering cost. Static policy lookups
 are indexed once. max_work accepts integers 1 through 1,000,000; max_depth remains
 0 through 128, with root depth zero.
 
@@ -123,6 +169,13 @@ policy indexing and local candidate reporting after a cut still cost input work.
 Very large inputs, large locksets, policy conjunctions and output volume retain
 their own costs. No exponential complete-path enumeration is promised after
 exhaustion.
+
+For the regression graph with 20 targets and 30 located calls, the old head
+used 2,687 metadata units / 2,749 total; this implementation uses 141 / 203,
+with the same 31 invocation visits and model-protected access. Tests also cover
+800 distinct targets, 800 sites of one target, exact budget boundaries, cuts
+with both held/absent inputs, and adjacency reordering. Recursive visits remain
+context-specific and globally bounded; this is not summary memoization.
 
 ## C2 integration
 
@@ -183,6 +236,7 @@ python -m checker check
 python -m checker.context --source-version v7.1
 python -m checker.lockset_demo
 python -m checker.lockset_demo --json
+python -m checker.lockset_demo --source-example
 git diff --check
 ```
 
@@ -192,13 +246,48 @@ deep and diamond graphs, global budgets, path evidence, contextual summaries,
 C2 identity/mode/configuration boundaries and unknown output. Host unit tests
 prove no actual kernel safety.
 
+### Source-backed helper example
+
+`--source-example` models the **whole relevant lock/write/control body** of
+[`dsq_dec_nr`, ext.c:1405-1419](https://github.com/torvalds/linux/blob/8cd9520d35a6c38db6567e97dd93b1f11f185dc6/kernel/sched/ext.c#L1405-L1419).
+The explicit input object is one local DSQ embedded in cpu0's rq; its owning rq
+lock is assumed held on entry. Local-DSQ rq protection is documented at
+[2574-2576](https://github.com/torvalds/linux/blob/8cd9520d35a6c38db6567e97dd93b1f11f185dc6/kernel/sched/ext.c#L2574-L2576).
+This is an opt-in hand-authored model (`provenance.synthetic=True`), with exact
+v7.1 references; it is not an extracted kfunc graph or observed entry ownership.
+
+The model writes DSQ nr (1408), then represents the false branch of the outer
+IMMED condition (1410) as the function's implicit return at 1419. The true
+branch of the WARN condition (1413-1414) explicitly returns at 1415. The
+continuation decrements `rq.scx.nr_immed` (1417). Neither continuing branch
+changes the tracked lock; all diagnostic/return-path uncertainty joins at exit.
+There are no omitted lock-changing calls, acquisitions or lexical cleanup in
+this helper. This justifies the helper-level model attestations; it does not
+attest to any unmodeled caller or any other invocation/object.
+
+Observed output (after the assumption banner):
+
+```text
+line 1408: scx_dispatch_q.nr, local_dsq.cpu0.owning_rq.lock: known_held -> protected
+line 1417: rq.scx.nr_immed, local_dsq.cpu0.owning_rq.lock: known_held -> protected
+function exit: unknown (early-return paths/cleanup joined)
+```
+
+Changing the entry lock to UNKNOWN or removing completeness keeps both accesses
+UNKNOWN. A definitely absent entry lock gives model-unprotected results, not a
+kernel counterexample. `to_findings()` remains UNKNOWN-only. Full
+`dispatch_enqueue()` includes fallback/alias rewriting and other branches; no
+complete/linear attestation is fabricated for it to obtain a positive result.
+
 ## Remaining integration boundary
 
 A must verify the field-specific obligation, mode and object relationship.
-B must supply ordered complete events, scope cleanup/return information,
+B must supply ordered complete events, exact per-control-event lock effects,
+guard polarity and real branch exits, scope cleanup/return information,
 call/argument/field-object bindings and source/config provenance. The current
 catalog/callgraph contracts do not carry all of that evidence. Cross-epic review
-is required before changing them. Callback permissions alone do not satisfy
+is required before changing them. Until then, annotations/completeness live in
+the explicit Python model API; the normal C1 CLI does not invent them. Callback permissions alone do not satisfy
 the TA's three shared scheduler-state modification invariants.
 
 Read [the catalog design](README-c3-catalog.md) for the current A2/A3 rule audit,

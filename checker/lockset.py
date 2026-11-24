@@ -72,12 +72,91 @@ class PreconditionStatus(StrEnum):
         raise TypeError("compare PreconditionStatus values explicitly")
 
 
+class ControlEffect(StrEnum):
+    FALLTHROUGH = "fallthrough"
+    EARLY_RETURN = "early_return"
+    EXIT = "exit"
+
+    def __bool__(self) -> bool:
+        raise TypeError("compare ControlEffect values explicitly")
+
+
+class GuardBranch(StrEnum):
+    CONDITION_TRUE = "condition_true"
+    CONDITION_FALSE = "condition_false"
+
+    def __bool__(self) -> bool:
+        raise TypeError("compare GuardBranch values explicitly")
+
+
+@dataclass(frozen=True)
+class ControlSemantics:
+    """Reviewed control/lock effects of exactly one event, outside the schema.
+
+    FALLTHROUGH preserves tracked locks on both diagnostic outcomes.
+    EARLY_RETURN preserves locks on the continuation; its returning branch
+    has unknown cleanup/effects. EXIT proves no local fallthrough, without
+    claiming that the caller resumes or that exit cleanup preserves locks.
+    References and attestations are supplied by the model author, not inferred.
+    """
+    function: str
+    event_index: int
+    event: tuple[tuple[str, str | int], ...]
+    effect: ControlEffect
+    reference: SourceReference
+    branch_when: GuardBranch | None = None
+
+    @classmethod
+    def for_event(cls, function, event_index, event, effect, reference, *, branch_when=None):
+        if not isinstance(event, Mapping):
+            raise TypeError("control event must be a mapping")
+        return cls(function, event_index, tuple(event.items()), effect, reference, branch_when)
+
+    def __post_init__(self) -> None:
+        require_name(self.function, "control function")
+        if type(self.event_index) is not int or self.event_index < 0:
+            raise ValueError("control event_index must be a nonnegative integer")
+        pairs = tuple(self.event)
+        if any(not isinstance(pair, tuple) or len(pair) != 2
+               or not isinstance(pair[0], str) or type(pair[1]) not in (str, int) for pair in pairs):
+            raise TypeError("control event must contain immutable scalar key/value pairs")
+        if len({key for key, _ in pairs}) != len(pairs):
+            raise ValueError("duplicate control event key")
+        object.__setattr__(self, "event", tuple(sorted(pairs)))
+        event = dict(pairs)
+        if event.get("kind") not in ("guard", "warn", "error"):
+            raise ValueError("control semantics apply only to guard/warn/error events")
+        if not isinstance(self.effect, ControlEffect):
+            raise TypeError("control effect must be a ControlEffect")
+        if self.branch_when is not None and not isinstance(self.branch_when, GuardBranch):
+            raise TypeError("branch_when must be a GuardBranch")
+        if self.effect == ControlEffect.EARLY_RETURN:
+            if (event["kind"] != "guard" or event.get("action") != "return"
+                    or not event.get("cond") or self.branch_when is None):
+                raise ValueError("early return needs a guard, condition, return action and explicit branch polarity")
+        elif event["kind"] == "guard" or self.branch_when is not None:
+            raise ValueError("guards require early-return semantics; fallback/continue branches need a CFG")
+        elif self.effect == ControlEffect.FALLTHROUGH and event.get("action") not in (None, "continue", "error"):
+            raise ValueError("fallthrough cannot certify a return or unresolved fallback")
+        elif self.effect == ControlEffect.EXIT and "cond" in event:
+            raise ValueError("conditional exits need a modeled guard and continuation")
+        ref = self.reference
+        if not isinstance(ref, SourceReference) or ref.symbol != self.function:
+            raise ValueError("control reference must identify its function")
+        if type(ref.line) is not int or type(ref.end_line) is not int or not 1 <= ref.line <= ref.end_line:
+            raise ValueError("control reference needs a valid source line range")
+        require_name(ref.file, "control source file")
+        require_name(ref.source_version, "control source version")
+        require_name(ref.source_commit, "control source commit")
+
+
 @dataclass(frozen=True)
 class Provenance:
     """Caller attestations, absent from the shared callgraph schema.
 
-    complete_events and linear_events attest to exhaustive, unconditional,
-    successful primitive events, stable bindings, and no omitted branches.
+    complete_events and linear_events attest to exhaustive successful primitive
+    events, stable bindings, and linear control between reviewed control events.
+    No branch or cleanup may be omitted, including branches inside predicates.
     They are modeling assumptions, never certificates of kernel behavior.
     """
     source_commit: str | None = None
@@ -191,6 +270,7 @@ class AnalysisResult:
     exits: tuple[RootExit, ...]
     summaries: tuple[FunctionSummary, ...] = ()
     work: AnalysisWork | None = None
+    control_semantics: tuple[ControlSemantics, ...] = ()
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, sort_keys=True, allow_nan=False) + "\n"
@@ -207,6 +287,7 @@ class _Flow:
 class _Effects:
     acquired: set[LockIdentity] = field(default_factory=set)
     released: set[LockIdentity] = field(default_factory=set)
+    early_return: bool = False
 
 
 class _WorkBudgetExceeded(Exception):
@@ -215,9 +296,10 @@ class _WorkBudgetExceeded(Exception):
 
 
 class _Analyzer:
-    def __init__(self, graph, policy, bindings, max_depth, max_work):
+    def __init__(self, graph, policy, bindings, max_depth, max_work, control_semantics):
         self.graph, self.policy, self.bindings = graph, policy, bindings
         self.max_depth = max_depth
+        self.control_semantics = {(item.function, item.event_index): item for item in control_semantics}
         self.accesses: list[AccessAssessment] = []
         self.preconditions: list[PreconditionAssessment] = []
         self.conditions: list[AnalysisCondition] = []
@@ -301,11 +383,6 @@ class _Analyzer:
         self.accesses.append(AccessAssessment(site, rule.field, access, rule.lock, observed,
                                               assessment, explanation, flow.conditions))
 
-    @staticmethod
-    def matches(edge, event):
-        return (edge["target"] == event.get("target")
-                and ("line" not in edge or "line" not in event or edge["line"] == event["line"]))
-
     def visit(self, path, flow):
         entry, effects = flow.locks, _Effects()
         first_access, first_precondition = len(self.accesses), len(self.preconditions)
@@ -337,6 +414,11 @@ class _Analyzer:
             # Known identities confine this uncertainty to the acquired locks.
             # It must not suppress a later explicit unlock of another lock.
             flow = _Flow(locks, (*flow.conditions, condition), flow.tainted)
+        if effects.early_return:
+            # The local continuation does not describe every returning path.
+            # Cleanup and effects on a taken return branch are not in the CFG.
+            flow = self.uncertain(flow, "early_return_join", self.site(path),
+                                  "Reviewed early-return paths join at function exit with unknown cleanup/effects.")
         assertions = tuple(p for p in self.preconditions[first_precondition:] if p.site.path == path)
         self.summaries.append(FunctionSummary(
             self.site(path), entry, flow.locks,
@@ -384,31 +466,47 @@ class _Analyzer:
             return self.uncertain(flow, "opaque_callee", site, f"Effects of {node['kind']} function {name} are unknown.")
 
         events = node.get("events")
+        edge_kinds, site_kinds, unlocated_kinds = {}, {}, {}
         if events is None:
             flow = self.uncertain(flow, "missing_events", site, "No ordered event body; absence does not imply purity.")
         else:
-            calls = [event for event in self.checked(events, site) if event["kind"] == "call"]
+            call_sites, unlocated_calls, edge_lines, edge_sites = {}, {}, {}, set()
+            sequenced_fields = set()
+            for event in self.checked(events, site):
+                if event["kind"] == "call":
+                    target = event.get("target")
+                    call_sites.setdefault(target, set()).add(event.get("line"))
+                    if "line" not in event:
+                        unlocated_calls[target] = unlocated_calls.get(target, 0) + 1
+                elif event["kind"] in ("write", "atomic"):
+                    sequenced_fields.add(event.get("field"))
+            for edge in self.checked(node["callees"], site):
+                target, kind, line = edge["target"], edge["kind"], edge.get("line")
+                edge_kinds.setdefault(target, set()).add(kind)
+                edge_sites.add((target, kind, line))
+                if line is None:
+                    unlocated_kinds.setdefault(target, set()).add(kind)
+                else:
+                    site_kinds.setdefault((target, line), set()).add(kind)
+                    edge_lines.setdefault(target, set()).add(line)
             # A line-less event cannot stand in for several distinct source
             # call sites. Duplicate metadata for the same line is not another
             # site; unlocated adjacency alone does not establish multiplicity.
-            for target in sorted({edge["target"] for edge in self.checked(node["callees"], site) if "line" in edge}):
-                target_calls = [event for event in self.checked(calls, site) if event.get("target") == target]
-                located = {event["line"] for event in target_calls if "line" in event}
-                missing_lines = {edge["line"] for edge in self.checked(node["callees"], site)
-                                 if edge["target"] == target and "line" in edge} - located
-                unlocated_count = sum("line" not in event for event in target_calls)
-                if len(missing_lines) > unlocated_count:
+            for target in self.checked(sorted(edge_lines), site):
+                missing_lines = edge_lines[target] - call_sites.get(target, set())
+                if len(missing_lines) > unlocated_calls.get(target, 0):
                     flow = self.uncertain(flow, "incomplete_call_sites", site,
                                           f"Distinct call sites for {target} at {sorted(missing_lines)} "
                                           "cannot all be covered by the available ordered call events.")
             # Adjacency is used only for coverage and call-kind classification.
             # An unsequenced call could precede *any* event in this function.
-            for edge in sorted(self.checked(node["callees"], site), key=lambda edge: (edge["target"], edge["kind"], edge.get("line", -1))):
-                if not any(self.matches(edge, event) for event in self.checked(calls, site)):
+            for target, kind, line in self.checked(sorted(edge_sites, key=lambda e: (e[0], e[1], e[2] is not None, e[2] or 0)), site):
+                locations = call_sites.get(target, set())
+                if not locations or (line is not None and None not in locations and line not in locations):
                     flow = self.uncertain(flow, "unsequenced_callee", site,
-                                          f"Callee {edge['target']} has no matching ordered call event.")
-        sequenced_fields = {event.get("field") for event in self.checked(events or (), site)
-                            if event["kind"] in ("write", "atomic")}
+                                          f"Callee {target} has no matching ordered call event.")
+        if events is None:
+            sequenced_fields = set()
         for field in self.checked(sorted(set(node.get("writes", ())) - sequenced_fields), site):
             flow = self.uncertain(flow, "unordered_write", site,
                                   f"Write metadata for {field} has no ordered event; access kind/order are unknown.")
@@ -421,8 +519,17 @@ class _Analyzer:
             site, kind = self.site(path, event, index), event["kind"]
             self.step(site, "events")
             if kind in ("guard", "error", "warn"):
-                flow = self.uncertain(flow, "unknown_control_flow", site,
-                                      f"{kind} may change reachability or effects; the schema supplies no CFG.")
+                semantics = self.control_semantics.get((name, index))
+                if semantics is None:
+                    flow = self.uncertain(flow, "unknown_control_flow", site,
+                                          f"{kind} lacks reviewed control/lock effects; action text alone supplies no CFG.")
+                elif semantics.effect == ControlEffect.EARLY_RETURN:
+                    effects.early_return = True
+                elif semantics.effect == ControlEffect.EXIT:
+                    return self.uncertain(flow, "control_exit", site,
+                                          "Reviewed exit has no local fallthrough; cleanup and caller continuation are unknown.")
+                # A reviewed FALLTHROUGH is a lock-preserving diagnostic.
+                # It never repairs previous uncertainty or acquires a lock.
                 continue
             if "cond" in event or "action" in event:
                 flow = self.uncertain(flow, "conditional_event", site, "Conditional event without a CFG.")
@@ -464,8 +571,10 @@ class _Analyzer:
                     ))
             elif kind == "call":
                 target = event.get("target")
-                matches = [edge for edge in self.checked(node["callees"], site) if self.matches(edge, event)]
-                if not target or not matches or any(edge["kind"] != "direct" for edge in matches):
+                self.step(site, "metadata")
+                kinds = (edge_kinds.get(target, set()) if "line" not in event else
+                         unlocated_kinds.get(target, set()) | site_kinds.get((target, event["line"]), set()))
+                if not target or kinds != {"direct"}:
                     flow = self.uncertain(flow, "unresolved_call", site,
                                           f"Call to {target!r} is missing, indirect, or lacks unambiguous direct-call metadata.")
                 else:
@@ -484,6 +593,7 @@ def analyze(
     provenance: Provenance | None = None,
     max_depth: int = 32,
     max_work: int = 10000,
+    control_semantics: tuple[ControlSemantics, ...] = (),
 ) -> AnalysisResult:
     """Analyze each root independently; no registration, alias guessing, or kernel verdicts.
 
@@ -500,6 +610,30 @@ def analyze(
     provenance = provenance if provenance is not None else Provenance()
     if not isinstance(provenance, Provenance):
         raise TypeError("provenance must be a Provenance")
+    control_semantics = tuple(control_semantics)
+    if (control_semantics and not provenance.synthetic
+            and not re.fullmatch(r"[0-9a-f]{40}", provenance.source_commit or "")):
+        raise SourceVersionMismatch("source control semantics require full commit provenance")
+    seen_controls = set()
+    for item in control_semantics:
+        if not isinstance(item, ControlSemantics):
+            raise TypeError("control_semantics must contain ControlSemantics objects")
+        key = (item.function, item.event_index)
+        if key in seen_controls:
+            raise ValueError("duplicate control semantics for one event")
+        seen_controls.add(key)
+        ref = item.reference
+        if ref.source_version != callgraph["kernel_version"] or ref.source_commit != provenance.source_commit:
+            raise SourceVersionMismatch("control semantics require matching source version and commit provenance")
+        node = callgraph["nodes"].get(item.function, {})
+        events = node.get("events", ())
+        if item.event_index >= len(events) or dict(item.event) != events[item.event_index]:
+            raise ValueError("control semantics do not match the exact recorded event")
+        event = events[item.event_index]
+        if (node.get("file") != ref.file or "line" not in event
+                or not ref.line <= event["line"] <= ref.end_line):
+            raise ValueError("control reference does not match the event's source location")
+    control_semantics = tuple(sorted(control_semantics, key=lambda item: (item.function, item.event_index)))
     bindings = {} if bindings is None else {function: dict(values) for function, values in bindings.items()}
     for function, values in bindings.items():
         require_name(function, "binding function")
@@ -530,7 +664,7 @@ def analyze(
                               enabled_configs=provenance.enabled_configs)
         contexts[root] = context
 
-    engine = _Analyzer(callgraph, policy, bindings, max_depth, max_work)
+    engine = _Analyzer(callgraph, policy, bindings, max_depth, max_work, control_semantics)
     exits = []
     for root in sorted(roots):
         site = engine.site((root,))
@@ -559,7 +693,7 @@ def analyze(
         exits.append(RootExit(root, flow.locks, flow.conditions))
     return AnalysisResult(callgraph["kernel_version"], provenance, callgraph.get("illustrative", False),
                           tuple(engine.accesses), tuple(engine.preconditions), tuple(engine.conditions), tuple(exits),
-                          tuple(engine.summaries), engine.work())
+                          tuple(engine.summaries), engine.work(), control_semantics)
 
 
 def to_findings(result: AnalysisResult, *, invariant: str) -> list[Finding]:

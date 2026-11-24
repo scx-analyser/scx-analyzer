@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 import unittest
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from itertools import product
 from pathlib import Path
 from unittest.mock import patch
@@ -15,10 +15,11 @@ import jsonschema
 from checker import runner
 from checker.checkers import _REGISTRY, registered
 from checker.context import (SOURCE_COMMIT, SOURCE_VERSION, LockIdentity as ContextLockIdentity,
-                             LockState, SourceVersionMismatch)
+                             LockState, SourceReference, SourceVersionMismatch)
 from checker.lock_policy import AccessKind, LockIdentity, ProtectionPolicy, ProtectionRule
 from checker.lockset import (
-    Assessment, LockOwnership, Lockset, PreconditionStatus, Provenance, analyze, to_findings,
+    Assessment, ControlEffect, ControlSemantics, GuardBranch, LockOwnership, Lockset,
+    PreconditionStatus, Provenance, analyze, to_findings,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -626,6 +627,326 @@ class ReviewBlockerTests(unittest.TestCase):
         for limit in (0, -1, True, None, 1.5, "100", 1000001):
             with self.subTest(limit=limit), self.assertRaisesRegex(ValueError, "max_work"):
                 self.run_nodes({"root": node([])}, max_work=limit)
+
+
+class ControlFlowReviewTests(unittest.TestCase):
+    assert_assessments = LocksetTests.assert_assessments
+    codes = LocksetTests.codes
+    provenance = Provenance("synthetic-control", True, True, True)
+
+    def run_nodes(self, nodes, **kwargs):
+        kwargs.setdefault("provenance", self.provenance)
+        return LocksetTests.run_nodes(self, nodes, **kwargs)
+
+    def annotation(self, event, effect=ControlEffect.FALLTHROUGH, *, function="root", index=0,
+                   branch_when=None):
+        ref = SourceReference("synthetic.c", function, event["line"], event["line"],
+                              "synthetic-c3-v1", "synthetic-control")
+        return ControlSemantics.for_event(function, index, event, effect, ref, branch_when=branch_when)
+
+    def return_guard(self, *, function="root", index=0, branch_when=GuardBranch.CONDITION_TRUE):
+        event = {"kind": "guard", "cond": "invalid_argument", "action": "return", "line": 10}
+        return event, self.annotation(event, ControlEffect.EARLY_RETURN, function=function,
+                                      index=index, branch_when=branch_when)
+
+    def test_nonterminating_warn_before_lock_allows_protected_write(self):
+        event = {"kind": "warn", "msg": "diagnostic", "line": 1}
+        result = self.run_nodes({"root": node([event, lock(), write(), unlock()])},
+                                control_semantics=(self.annotation(event),))
+        self.assert_assessments(result, Assessment.PROTECTED)
+
+    def test_warn_preserves_both_held_and_absent_lock_knowledge(self):
+        event = {"kind": "warn", "line": 1}
+        for state, expected in ((LockState.KNOWN_HELD, Assessment.PROTECTED),
+                                (LockState.KNOWN_NOT_HELD, Assessment.UNPROTECTED)):
+            with self.subTest(state=state):
+                result = self.run_nodes({"root": node([event, write()])},
+                                        control_semantics=(self.annotation(event),),
+                                        entry_states={"root": Lockset.from_mapping({RQ: state})})
+                self.assert_assessments(result, expected)
+
+    def test_proven_return_guard_preserves_only_the_continuation(self):
+        event, semantics = self.return_guard()
+        result = self.run_nodes({"root": node([event, lock(), write(), unlock()])},
+                                control_semantics=(semantics,))
+        self.assert_assessments(result, Assessment.PROTECTED)
+        self.assertEqual(LockState.UNKNOWN, result.exits[0].locks.state(RQ))
+        self.assertIn("early_return_join", self.codes(result))
+
+    def test_return_guard_preserves_known_absence_at_a_continuing_access(self):
+        event, semantics = self.return_guard(branch_when=GuardBranch.CONDITION_FALSE)
+        result = self.run_nodes({"root": node([event, write()])}, control_semantics=(semantics,),
+                                entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_NOT_HELD})})
+        self.assert_assessments(result, Assessment.UNPROTECTED)
+        self.assertEqual(GuardBranch.CONDITION_FALSE, result.control_semantics[0].branch_when)
+
+    def test_return_guard_does_not_acquire_a_lock(self):
+        event, semantics = self.return_guard()
+        self.assert_assessments(self.run_nodes({"root": node([event, write()])},
+                                              control_semantics=(semantics,)), Assessment.UNKNOWN)
+
+    def test_guard_action_return_without_reviewed_semantics_stays_unknown(self):
+        event, _ = self.return_guard()
+        self.assert_assessments(self.run_nodes({"root": node([event, lock(), write()])}), Assessment.UNKNOWN)
+
+    def test_fallback_and_continue_guards_stay_unknown(self):
+        for action in ("fallback", "continue", "error"):
+            with self.subTest(action=action):
+                event = {"kind": "guard", "cond": "flag", "action": action, "line": 1}
+                self.assert_assessments(self.run_nodes({"root": node([event, lock(), write()])}),
+                                        Assessment.UNKNOWN)
+                with self.assertRaises(ValueError):
+                    self.annotation(event, ControlEffect.EARLY_RETURN, branch_when=GuardBranch.CONDITION_TRUE)
+
+    def test_reviewed_early_exit_in_callee_is_joined_before_caller_write(self):
+        event, semantics = self.return_guard(function="leaf")
+        result = self.run_nodes({"root": node([lock(), call("leaf"), write()]),
+                                 "leaf": node([event, unlock()])}, control_semantics=(semantics,))
+        self.assert_assessments(result, Assessment.UNKNOWN)
+        self.assertEqual(LockState.UNKNOWN, next(s for s in result.summaries
+                                                 if s.site.function == "leaf").exit.state(RQ))
+
+    def test_callee_access_on_verified_continuation_can_be_protected(self):
+        event, semantics = self.return_guard(function="leaf")
+        result = self.run_nodes({"root": node([lock(), call("leaf"), write()]),
+                                 "leaf": node([event, write()])}, control_semantics=(semantics,))
+        self.assert_assessments(result, Assessment.PROTECTED, Assessment.UNKNOWN)
+        self.assertEqual(("root", "leaf"), result.accesses[0].site.path)
+
+    def test_errors_require_explicit_fallthrough_or_exit_semantics(self):
+        event = {"kind": "error", "msg": "error helper", "line": 1}
+        for effect in (None, ControlEffect.FALLTHROUGH, ControlEffect.EXIT):
+            with self.subTest(effect=effect):
+                semantics = () if effect is None else (self.annotation(event, effect),)
+                result = self.run_nodes({"root": node([event, write()])}, control_semantics=semantics,
+                                        entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})})
+                if effect == ControlEffect.EXIT:
+                    self.assertEqual((), result.accesses)
+                    self.assertIn("control_exit", self.codes(result))
+                    self.assertTrue(to_findings(result, invariant="I1"))
+                else:
+                    self.assert_assessments(result, Assessment.PROTECTED if effect is not None else Assessment.UNKNOWN)
+
+    def test_error_exit_does_not_prove_caller_locks_or_reachability(self):
+        event = {"kind": "error", "action": "return", "line": 1}
+        result = self.run_nodes({"root": node([lock(), call("leaf"), write()]),
+                                 "leaf": node([event, write()])},
+                                control_semantics=(self.annotation(event, ControlEffect.EXIT, function="leaf"),))
+        self.assert_assessments(result, Assessment.UNKNOWN)
+        self.assertEqual(("root",), result.accesses[0].site.path)
+
+    def test_fallthrough_cannot_certify_a_return_or_conditional_termination(self):
+        with self.assertRaises(ValueError):
+            self.annotation({"kind": "error", "action": "return", "line": 1})
+        with self.assertRaises(ValueError):
+            self.annotation({"kind": "error", "cond": "flag", "line": 1}, ControlEffect.EXIT)
+
+    def test_reviewed_diagnostic_does_not_repair_unknown_call_effects(self):
+        event = {"kind": "warn", "line": 1}
+        result = self.run_nodes({"root": node([call("missing"), event, lock(), write()])},
+                                control_semantics=(self.annotation(event, index=1),))
+        self.assert_assessments(result, Assessment.UNKNOWN)
+
+    def test_reviewed_controls_do_not_repair_incomplete_or_illustrative_models(self):
+        event, semantics = self.return_guard()
+        nodes = {"root": node([event, lock(), write()])}
+        for attr in ("complete_events", "linear_events"):
+            self.assert_assessments(self.run_nodes(nodes, control_semantics=(semantics,),
+                                                  provenance=replace(self.provenance, **{attr: False})),
+                                    Assessment.UNKNOWN)
+        result = analyze(graph(nodes, illustrative=True), policy("root"), bindings={"root": {"rq.lock": RQ}},
+                         provenance=self.provenance, control_semantics=(semantics,))
+        self.assert_assessments(result, Assessment.UNKNOWN)
+
+    def test_return_guard_and_wrong_object_lock_do_not_imply_protection(self):
+        event, semantics = self.return_guard()
+        result = self.run_nodes({"root": node([event, lock(), write()])},
+                                rules=policy("root", required=OTHER_RQ), control_semantics=(semantics,),
+                                entry_states={"root": Lockset.from_mapping({OTHER_RQ: LockState.KNOWN_NOT_HELD})})
+        self.assert_assessments(result, Assessment.UNPROTECTED)
+
+    def test_reviewed_control_cannot_turn_an_assertion_into_ownership(self):
+        event = {"kind": "warn", "line": 1}
+        result = self.run_nodes({"root": node([event, {"kind": "assert_held", "lock": "rq.lock"}, write()])},
+                                control_semantics=(self.annotation(event),))
+        self.assert_assessments(result, Assessment.UNKNOWN)
+
+    def test_annotation_matches_the_entire_event_not_just_kind_or_index(self):
+        event = {"kind": "warn", "msg": "diagnostic", "line": 1}
+        semantics = self.annotation(event)
+        for changed in ({**event, "msg": "different operation"}, {**event, "op": "panic"},
+                        {**event, "cond": "flag"}, {**event, "action": "return"}):
+            with self.subTest(event=changed), self.assertRaisesRegex(ValueError, "exact recorded event"):
+                self.run_nodes({"root": node([changed, write()])}, control_semantics=(semantics,))
+
+    def test_annotation_rejects_source_version_and_commit_mismatches(self):
+        event = {"kind": "warn", "line": 1}
+        semantics = self.annotation(event)
+        for ref in (replace(semantics.reference, source_version=SOURCE_VERSION),
+                    replace(semantics.reference, source_commit=SOURCE_COMMIT)):
+            with self.subTest(ref=ref), self.assertRaises(SourceVersionMismatch):
+                self.run_nodes({"root": node([event, write()])},
+                               control_semantics=(replace(semantics, reference=ref),))
+
+    def test_annotation_rejects_missing_provenance_and_stale_source_location(self):
+        event = {"kind": "warn", "line": 1}
+        semantics = self.annotation(event)
+        with self.assertRaises(SourceVersionMismatch):
+            self.run_nodes({"root": node([event])}, provenance=TRUSTED, control_semantics=(semantics,))
+        for ref in (replace(semantics.reference, file="other.c"),
+                    replace(semantics.reference, line=2, end_line=3)):
+            with self.subTest(ref=ref), self.assertRaisesRegex(ValueError, "source location"):
+                self.run_nodes({"root": node([event])}, control_semantics=(replace(semantics, reference=ref),))
+
+    def test_duplicate_and_out_of_range_annotations_are_rejected(self):
+        event = {"kind": "warn", "line": 1}
+        semantics = self.annotation(event)
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            self.run_nodes({"root": node([event])}, control_semantics=(semantics, semantics))
+        with self.assertRaisesRegex(ValueError, "exact recorded event"):
+            self.run_nodes({"root": node([event])}, control_semantics=(replace(semantics, event_index=3),))
+        with self.assertRaises(TypeError):
+            self.run_nodes({"root": node([event])}, control_semantics=({},))
+
+    def test_control_semantics_are_typed_immutable_and_deterministic(self):
+        warn = {"kind": "warn", "line": 1}
+        guard, early = self.return_guard(index=1)
+        first = self.annotation(warn)
+        before = self.run_nodes({"root": node([warn, guard, lock(), write()])},
+                                control_semantics=(first, early)).to_json()
+        after = self.run_nodes({"root": node([warn, guard, lock(), write()])},
+                               control_semantics=(early, first)).to_json()
+        self.assertEqual(before, after)
+        warn["msg"] = "changed after binding"
+        self.assertNotIn("msg", dict(first.event))
+        with self.assertRaises(FrozenInstanceError):
+            first.effect = ControlEffect.EXIT
+        for index in (-1, True):
+            with self.assertRaises(ValueError):
+                replace(first, event_index=index)
+        with self.assertRaises(TypeError):
+            replace(first, effect="fallthrough")
+
+    def test_controls_cannot_annotate_locking_operations_or_assertions(self):
+        for kind in ("lock", "unlock", "assert_held", "assert_not_held", "call"):
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                self.annotation({"kind": kind, "line": 1})
+
+    def test_reference_symbol_range_and_file_are_required(self):
+        semantics = self.annotation({"kind": "warn", "line": 1})
+        for ref in (replace(semantics.reference, symbol="other"),
+                    replace(semantics.reference, line=0), replace(semantics.reference, line=True),
+                    replace(semantics.reference, end_line=0), replace(semantics.reference, file="")):
+            with self.subTest(ref=ref), self.assertRaises(ValueError):
+                replace(semantics, reference=ref)
+
+    def test_nonsynthetic_controls_require_a_full_commit(self):
+        event = {"kind": "warn", "line": 1}
+        with self.assertRaisesRegex(SourceVersionMismatch, "full commit"):
+            self.run_nodes({"root": node([event])}, control_semantics=(self.annotation(event),),
+                           provenance=replace(self.provenance, synthetic=False))
+
+    def test_control_domain_values_reject_boolean_conversion(self):
+        for value in (*ControlEffect, *GuardBranch):
+            with self.subTest(value=value), self.assertRaises(TypeError):
+                bool(value)
+
+
+class MetadataIndexTests(unittest.TestCase):
+    run_nodes = LocksetTests.run_nodes
+    assert_assessments = LocksetTests.assert_assessments
+
+    def fanout(self, targets, calls=None):
+        calls = targets if calls is None else calls
+        nodes = {"root": node([*[call(f"f{i % targets}", line=i + 1) for i in range(calls)], write()])}
+        nodes.update({f"f{i}": node([]) for i in range(targets)})
+        return nodes
+
+    def test_twenty_targets_thirty_calls_fit_a_small_work_budget(self):
+        result = self.run_nodes(self.fanout(20, 30), rules=policy("root"), max_work=350,
+                                entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})})
+        self.assert_assessments(result, Assessment.PROTECTED)
+        self.assertFalse(result.work.exhausted)
+        self.assertEqual(31, result.work.function_visits)
+
+    def test_metadata_work_scales_linearly_across_distinct_targets(self):
+        previous = None
+        for size in (8, 80, 800):
+            result = self.run_nodes(self.fanout(size), rules=policy("root"),
+                                    entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})})
+            self.assert_assessments(result, Assessment.PROTECTED)
+            self.assertFalse(result.work.exhausted)
+            self.assertLess(result.work.metadata, 7 * size + 10)
+            if previous is not None:
+                self.assertLess(result.work.metadata, 11 * previous)
+            previous = result.work.metadata
+
+    def test_repeated_target_with_many_distinct_sites_also_scales_linearly(self):
+        result = self.run_nodes(self.fanout(1, 800), rules=policy("root"),
+                                entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})})
+        self.assert_assessments(result, Assessment.PROTECTED)
+        self.assertFalse(result.work.exhausted)
+        self.assertLess(result.work.metadata, 7 * 800 + 10)
+        self.assertEqual(801, result.work.function_visits)
+
+    def test_tight_budget_boundary_and_every_earlier_cut_are_conservative(self):
+        nodes = self.fanout(4)
+        full = self.run_nodes(nodes, rules=policy("root"))
+        for state in (LockState.KNOWN_HELD, LockState.KNOWN_NOT_HELD):
+            for budget in range(1, full.work.consumed):
+                result = self.run_nodes(nodes, rules=policy("root"), max_work=budget,
+                                        entry_states={"root": Lockset.from_mapping({RQ: state})})
+                self.assertTrue(result.work.exhausted)
+                self.assertEqual(budget, result.work.consumed)
+                self.assert_assessments(result, Assessment.UNKNOWN)
+        boundary = self.run_nodes(nodes, rules=policy("root"), max_work=full.work.consumed,
+                                  entry_states={"root": Lockset.from_mapping({RQ: LockState.KNOWN_HELD})})
+        self.assertFalse(boundary.work.exhausted)
+        self.assert_assessments(boundary, Assessment.PROTECTED)
+
+    def test_indexing_is_deterministic_under_adjacency_reordering(self):
+        fixture = graph(self.fanout(8, 20))
+        for budget in (5, 35, 10000):
+            before = analyze(fixture, policy("root"), provenance=TRUSTED, max_work=budget).to_json()
+            fixture["nodes"]["root"]["callees"].reverse()
+            after = analyze(fixture, policy("root"), provenance=TRUSTED, max_work=budget).to_json()
+            self.assertEqual(before, after)
+
+
+class SourceHelperExampleTests(unittest.TestCase):
+    def test_complete_helper_continuations_use_the_specific_local_rq_entry_lock(self):
+        from checker.lockset_demo import source_example
+
+        result = source_example()
+        self.assertEqual([("dsq_dec_nr", "scx_dispatch_q.nr", 1408), ("dsq_dec_nr", "rq.scx.nr_immed", 1417)],
+                         [(a.site.function, a.field, a.site.line) for a in result.accesses])
+        self.assertEqual([Assessment.PROTECTED, Assessment.PROTECTED], [a.assessment for a in result.accesses])
+        self.assertEqual(LockState.UNKNOWN, result.exits[0].locks.state(result.accesses[0].required_lock))
+        self.assertEqual(SOURCE_COMMIT, result.provenance.source_commit)
+        self.assertTrue(result.provenance.synthetic)  # hand model, not an extracted kernel trace
+        self.assertEqual([GuardBranch.CONDITION_FALSE, GuardBranch.CONDITION_TRUE],
+                         [s.branch_when for s in result.control_semantics])
+        self.assertTrue(all(f["verdict"] == "unknown" for f in to_findings(result, invariant="I1")))
+
+    def test_helper_does_not_infer_entry_ownership_or_completeness(self):
+        from checker.lockset_demo import source_example
+
+        for state, expected in ((LockState.KNOWN_NOT_HELD, Assessment.UNPROTECTED),
+                                (LockState.UNKNOWN, Assessment.UNKNOWN)):
+            result = source_example(entry_state=state)
+            self.assertEqual([expected, expected], [a.assessment for a in result.accesses])
+        result = source_example(complete_events=False)
+        self.assertEqual([Assessment.UNKNOWN, Assessment.UNKNOWN], [a.assessment for a in result.accesses])
+
+    def test_source_helper_cli_is_deterministic(self):
+        outputs = []
+        for seed in ("1", "42"):
+            completed = subprocess.run([sys.executable, "-m", "checker.lockset_demo", "--source-example", "--json"],
+                                       cwd=ROOT, capture_output=True, text=True,
+                                       env=dict(os.environ, PYTHONHASHSEED=seed))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            outputs.append(completed.stdout)
+        self.assertEqual(outputs[0], outputs[1])
 
 
 class InputAndContextTests(unittest.TestCase):

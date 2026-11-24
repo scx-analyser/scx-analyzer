@@ -2,9 +2,11 @@
 
 This is the proposed Epic C consumption design for Issue #34, based on
 [A2 PR #52](https://github.com/scx-analyser/scx-analyzer/pull/52)
-(`847a014d9d253d5bb7e0a4c5fd6b1b7a8abf1af7`) and
+(`fa34ff0a6866205bc93169909c2b25c3d1b61911`) and
 [A3 PR #53](https://github.com/scx-analyser/scx-analyzer/pull/53)
-(`698b3eb51c42fcde3ba7762df8c99563ee51c9a7`), inspected 2026-11-22.
+(`b4a71e6d2d89f831b3c20b768eb3c55344ae7dbd`), inspected 2026-11-24.
+These immutable references identify this audit, not a claim that moving PR
+branches will remain unchanged. Revalidate their current heads before integration.
 No Epic A document, shared schema, fixture or version pin is modified here.
 
 ## What can be translated
@@ -64,28 +66,30 @@ as exclusive protecting-lock identities.
 
 ## Audit of current A3 candidates
 
-The following is an eligibility audit, not a claim that A3's recorded kernel
-behavior is wrong. All 14 rule IDs were inspected.
+The revised A3 has seven protection rules and thirteen supporting entry-state
+rules. A2 now provides explicit `obligations` with field/access/object/site
+bindings, lock instances/modes, predicate captures, applicability and basis.
+This resolves the old independent field/lock-list binding gap. Schema validity
+does not verify alias relationships, source claims or event completeness.
 
-| A3 rule(s) | Why no current exclusive field-lock policy can be compiled automatically |
+| A3 protection rule | C3 consumption boundary |
 |---|---|
-| I1.dsq_insert.context | rq/pi_lock are callback-entry facts. The access-site requirement names interrupt-disabled state and BPF-lock exclusion, not a verified field-to-specific-exclusive-lock relation. |
-| I1.dispatch_only.context; I1.cpu_release.context | Held rq requirements are callback-entry context; no field/site/object locking relation is established merely by sharing this rule. |
-| I1.dsq_move.context | Callback-dependent entry locks/absence and runtime-state predicates do not bind the moved task's actual field object/lock on every path. |
-| I1.create_dsq.sleepable; I1.select_cpu.context | Sleepability/context or read conditions; no eligible shared-write locking obligation. |
-| I1.idle.context; I1.any.context | Permission groups and broad affected objects do not define a protecting-lock policy. |
-| I1.locked_rq.runtime | Runtime rq predicates/ownership checks require resolved arguments and path conditions; there is no unconditional field-specific lock obligation to copy. |
-| I1.dump.context | Source-backed dump entry guards support C2; an explicit access-site field/object obligation is still required for C3 policy compilation. |
-| I1.task_cgroup.subject_task | Read/subject-task and callback-entry facts, not the required shared modification invariant. |
-| I1.task_set.unlocked_write | The task_rq access-site entry explicitly describes a **hypothesis** for stable writes, NOT a requirement stated or checked by the kernel. Source_verified describes the observed behavior; it cannot certify the hypothesized obligation. |
-| I1.bpf_spin_lock.no_calls; I1.prog_type.gate | Program/verifier exclusions and type gates; no exclusive protecting-lock relation for shared state. |
+| I1.nonlocal_dsq.dsq_lock | Observed acquisitions are not automatically normative policies. The documented dsq_flags obligation still needs the exact nonlocal DSQ/field identity. |
+| I1.local_dsq.rq_lock | Checked/documented local-DSQ obligations are candidates after binding the destination rq, source DSQ, concrete writer sites and applicability. |
+| I1.rq_scx.rq_lock | Target rq and captured locked_rq must be resolved; balance entry-prefix writes are not descendants of every root. |
+| I1.ops_state.atomic | Atomic ordering/state requirements are not ordinary write-lock policies. The inspected claim_cmpxchg still shares a dispatch-only snapshot predicate with ops_dequeue; that scope correction is tracked in the A3 review. |
+| I1.dsq_insert.commit_guards | Direct/buffered snapshot and capacity requirements need guard analysis, not a guessed lock. Earlier slice/vtime writes are outside those guarantees. |
+| I1.dsq_move.slice_vtime | Source task rq plus source DSQ are explicit candidates, subject to verified caller/object bindings, scope, provenance and complete events. |
+| I1.task_slice_vtime.unlocked_writers | Draft, basis=hypothesis. Never compile the proposed task_rq requirement into a mandatory policy. |
 
-The most tempting candidate is
-[`I1.task_set.unlocked_write`](https://github.com/scx-analyser/scx-analyzer/blob/698b3eb51c42fcde3ba7762df8c99563ee51c9a7/catalog/invariants/I1.yaml#L483-L512):
-`scx_bpf_task_set_slice` / `scx_bpf_task_set_dsq_vtime` modify
-`task_struct.scx.slice` / `scx.dsq_vtime`, but the description explicitly says
-the task_rq lock requirement is a hypothesis and kernel-doc states no such rule.
-C3 must not turn that into either a proven violation or a safety proof.
+All thirteen `role: entry_state` rules remain context/precondition information;
+they produce no field-protection policies. The old `I1.task_set.unlocked_write`
+and `I1.locked_rq.runtime` ids were replaced. The revised catalog now supplies
+genuine shared-state obligations; permission groups alone remain insufficient.
+
+For the precise remaining A3 predicate-scope issue, see the
+[source-backed re-review](https://github.com/scx-analyser/scx-analyzer/pull/53#pullrequestreview-6047938021).
+That catalog issue is not repaired by silently dropping a conjunct in C3.
 
 Thus **zero production policies are installed from the inspected A3 catalog**.
 Unsupported writes produce explicit `no_write_policy`/`no_atomic_policy`
@@ -100,12 +104,15 @@ explicitly as "no semantic checkers installed (no safety claim)".
    invariant, and distinguish observed source behavior from the normative
    obligation. Review one exact field/site/object-to-lock/mode relation, including
    all predicates and whether a hypothesized requirement is actually justified.
-2. **A/C:** provide an explicit reviewed binding manifest or a coordinated
-   contract extension connecting a rule ID to writer sites and field/lock object
-   expressions. Keep rule-family identity for C1 findings. The current nested
-   objects/locks lists alone do not specify that relation safely.
+2. **A/C:** consume the revised A2 obligation bindings after review: exact writer
+   function, field, access kind, sites, object, required lock mode, applicability
+   and basis. Keep rule-family identity for C1 findings. Current ProtectionRule
+   matches function/field/access, not individual source lines: an adapter must
+   prove uniform applicability at every matching site or retain UNKNOWN rather
+   than widen a site-specific or conditional obligation to the whole function.
 3. **B:** provide actual call paths, ordered events with cleanup/return semantics,
-   call-site IDs, argument/field-object identities, completeness evidence,
+   reviewed per-event diagnostic/guard semantics, branch polarity, call-site IDs,
+   argument/field-object identities, completeness evidence,
    full commit and configuration. Current callgraph JSON has no commit, scope or
    argument/object binding fields. Caller attestations are model assumptions,
    not automatically verified source evidence.
@@ -134,8 +141,13 @@ sufficiently justified field-lock relation plus real graph/source/binding/scope
 evidence to enable it. This remains an explicit #34 acceptance dependency,
 rather than an optimistic demonstration claiming to satisfy it.
 
-The scope-return and complexity fixes, invocation summaries and regressions are
-ready for review independently. Closing #34/merging a production checker still
+The source-backed dsq_dec_nr helper demo supplies a fixed local-DSQ object and
+explicit assumed rq entry ownership. Its complete helper-level model illustrates
+reviewed returning guards; it does not supply a real extracted kfunc graph or
+replace production catalog translation. The findings adapter remains UNKNOWN.
+
+The scope-return, control-event and metadata-indexing fixes, invocation summaries
+and regressions are ready for review independently. Closing #34/merging a production checker still
 requires the A/B decisions and evidence above. Verifier calling-context permissions
 alone do not satisfy the TA's three graded shared scheduler-state modification
 invariants.
