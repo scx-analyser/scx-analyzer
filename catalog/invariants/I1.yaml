@@ -363,8 +363,9 @@ invariants:
           never written with a plain store. QUEUEING is entered (and left) under
           the task's rq lock; leaving QUEUEING or DISPATCHING uses
           atomic_long_set_release() to pair with waiters' load_acquire; claims
-          (QUEUED -> DISPATCHING in finish_dispatch, QUEUED -> NONE in
-          ops_dequeue) use atomic_long_try_cmpxchg(). The legal transitions
+          (QUEUED -> DISPATCHING in finish_dispatch, guarded by the qseq
+          captured at insert time; QUEUED -> NONE in ops_dequeue, under p's rq
+          lock with no dispatch snapshot) use atomic_long_try_cmpxchg(). The legal transitions
           themselves are I2 (ownership); this rule records the write discipline
           on the kfunc paths (scx_bpf_dsq_move_to_local -> flush_dispatch_buf ->
           finish_dispatch / dispatch_enqueue / dispatch_to_local_dsq).
@@ -402,11 +403,10 @@ invariants:
               - {kind: kernel_comment, file: kernel/sched/ext_internal.h, line: 1303, end_line: 1306, note: "transitions out of QUEUEING / DISPATCHING must use atomic_long_set_release()"}
               - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1638, end_line: 1640, symbol: dispatch_enqueue}
               - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2621, symbol: dispatch_to_local_dsq}
-          - id: claim_cmpxchg
+          - id: dispatch_claim_cmpxchg
             access: {struct: task_struct, fields: [scx.ops_state], op: atomic, ordering: full, instance: p}
             sites:
               - {function: finish_dispatch, file: kernel/sched/ext.c, line: 2724, end_line: 2725}
-              - {function: ops_dequeue, file: kernel/sched/ext.c, line: 2109, end_line: 2110}
             requires:
               predicates:
                 - expr: "(opss & SCX_OPSS_QSEQ_MASK) == qseq_at_dispatch"
@@ -415,7 +415,7 @@ invariants:
                   evaluated_at: {function: finish_dispatch, file: kernel/sched/ext.c, line: 2708}
                   checked_by: [finish_dispatch]
                   on_failure: return
-                  note: "finish_dispatch only; stale request after dequeue/re-enqueue is dropped (2709)"
+                  note: "stale request after dequeue/re-enqueue is dropped (2709); ops_dequeue has no such snapshot, see dequeue_claim_cmpxchg"
             basis: documented
             evidence:
               - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2717, end_line: 2723, symbol: finish_dispatch, note: "claim @p by atomically transitioning it from QUEUED to DISPATCHING"}
@@ -426,6 +426,24 @@ invariants:
                   - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8530, call: "flush_dispatch_buf(sch, dspc->rq)", held: [{lock: rq, instance: dspc->rq}]}
                   - {function: flush_dispatch_buf, file: kernel/sched/ext.c, line: 2757, call: "finish_dispatch(sch, rq, ent->task, ent->qseq, ent->dsq_id, ent->enq_flags)", held: [{lock: rq, instance: rq}]}
                   - {function: finish_dispatch, file: kernel/sched/ext.c, line: 2724, held: [{lock: rq, instance: rq}], note: "rq is the dispatching CPU's rq, not necessarily task_rq(p); ownership comes from the cmpxchg"}
+          - id: dequeue_claim_cmpxchg
+            access: {struct: task_struct, fields: [scx.ops_state], op: atomic, ordering: full, instance: p}
+            sites:
+              - {function: ops_dequeue, file: kernel/sched/ext.c, line: 2109, end_line: 2110}
+            requires:
+              locks:
+                - {lock: rq, instance: rq, state: held, note: "ops_dequeue(rq, p, ...) runs under p's rq lock (dequeue_task_scx 2166, core-sched pick 2974)"}
+              predicates:
+                - expr: "READ_ONCE(p->scx.flags) & SCX_TASK_IN_CUSTODY"
+                  evaluated_at: {function: ops_dequeue, file: kernel/sched/ext.c, line: 2104}
+                  checked_by: [ops_dequeue]
+                  on_failure: continue
+                  note: "cpu_relax(); goto retry (2105-2106) until finish_dispatch publishes NONE; no dispatch qseq snapshot is involved: QUEUED -> NONE is attempted on ops_state freshly read with acquire (2083)"
+            basis: documented
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2089, end_line: 2093, symbol: ops_dequeue, note: "caller holds p's rq lock, so QUEUEING cannot be observed"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2095, end_line: 2103, symbol: ops_dequeue, note: "QUEUED implies custody; retry is bounded"}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 2104, end_line: 2106, symbol: ops_dequeue}
         applies_to: [scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2]
         enforcement:
           expected: runtime
