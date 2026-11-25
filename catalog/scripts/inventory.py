@@ -12,9 +12,12 @@ Usage:
 
 The kernel source defaults to $KERNEL_SRC, then ~/linux. The pin is the tag in
 KERNEL_VERSION plus its full commit SHA in KERNEL_COMMIT. The tree's HEAD must
-be that commit and kernel/sched/ must have no local changes; otherwise the
-script fails before writing anything. --allow-kernel-mismatch turns this into
-a warning for exploratory runs against another tree.
+be that commit and `git status` must succeed and show no local changes in
+kernel/sched/; otherwise the script fails before writing anything. A pinned run
+reads the .c/.h files of the pinned commit from Git objects, so untracked or
+ignored files on disk cannot change the output. --allow-kernel-mismatch turns
+the checks into warnings for exploratory runs against another tree; such runs
+scan every .c/.h on disk.
 Stdlib only.
 """
 
@@ -24,7 +27,7 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAN_DIR = "kernel/sched"
@@ -89,10 +92,59 @@ def kernel_problems(src, tag, commit):
         problems.append(f"tag {tag} is {tag_commit} in {src}, but KERNEL_COMMIT pins {commit}")
     if head != commit:
         problems.append(f"{src} HEAD is {head}, expected {commit} ({tag})")
+    # None means git status failed; only an empty string means a clean tree.
     dirty = git(src, "status", "--porcelain", "--untracked-files=no", "--", SCAN_DIR)
-    if dirty:
+    if dirty is None:
+        problems.append(f"git status failed in {src}, so {SCAN_DIR}/ cannot be "
+                        f"checked for local changes")
+    elif dirty:
         problems.append(f"{src}/{SCAN_DIR} has local changes")
     return problems
+
+
+def git_bytes(src, *args):
+    """Raw stdout of a git command in `src`; exit if it fails."""
+    try:
+        out = subprocess.run(["git", "-C", str(src), *args], capture_output=True, check=False)
+    except OSError as e:
+        sys.exit(f"error: cannot run git: {e}")
+    if out.returncode != 0:
+        sys.exit(f"error: git {' '.join(args)} failed in {src}: "
+                 f"{out.stderr.decode(errors='replace').strip()}")
+    return out.stdout
+
+
+def decode_source(data):
+    """Bytes -> text, as Path.read_text(encoding='utf-8', errors='replace') reads them."""
+    text = data.decode("utf-8", errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def pinned_sources(src, commit):
+    """(rel, text) for each .c then .h under SCAN_DIR in `commit`'s tree.
+
+    Contents come from Git objects, not the disk, so untracked, ignored or
+    assume-unchanged files cannot alter a pinned inventory.
+    """
+    blobs = {}
+    for rec in git_bytes(src, "ls-tree", "-r", "-z", commit, "--", f"{SCAN_DIR}/").split(b"\0"):
+        if not rec:
+            continue
+        meta, path = rec.split(b"\t", 1)
+        mode, kind, oid = meta.split()
+        rel = path.decode("utf-8", errors="surrogateescape")
+        if kind == b"blob" and mode != b"120000" and rel.endswith((".c", ".h")):
+            blobs[rel] = oid.decode()
+    order = (sorted((r for r in blobs if r.endswith(".c")), key=PurePosixPath)
+             + sorted((r for r in blobs if r.endswith(".h")), key=PurePosixPath))
+    for rel in order:
+        yield rel, decode_source(git_bytes(src, "cat-file", "blob", blobs[rel]))
+
+
+def disk_sources(src, scan_root):
+    """(rel, text) for each .c then .h on disk under `scan_root` (exploratory runs)."""
+    for path in sorted(scan_root.rglob("*.c")) + sorted(scan_root.rglob("*.h")):
+        yield path.relative_to(src).as_posix(), path.read_text(encoding="utf-8", errors="replace")
 
 
 def normalize_flags(raw):
@@ -181,11 +233,6 @@ class CondTracker:
         return conjoin(self.terms())
 
 
-def scan_file(path, rel):
-    """Return (entries, definitions) for one source file."""
-    return scan_text(path.read_text(encoding="utf-8", errors="replace"), rel)
-
-
 def scan_text(text, rel):
     """Return (entries, definitions) for the contents of one source file."""
     lines = text.splitlines()
@@ -252,10 +299,10 @@ def main(argv=None, repo_root=REPO_ROOT):
                      f"{tag} or pass --allow-kernel-mismatch for an exploratory run")
     actual = f"{tag} ({commit[:12]})" if not problems else "unpinned"
 
+    sources = disk_sources(src, scan_root) if problems else pinned_sources(src, commit)
     entries, defs = [], {}
-    for path in sorted(scan_root.rglob("*.c")) + sorted(scan_root.rglob("*.h")):
-        rel = path.relative_to(src).as_posix()
-        e, d = scan_file(path, rel)
+    for rel, text in sources:
+        e, d = scan_text(text, rel)
         entries.extend(e)
         for name, loc in d.items():
             defs.setdefault(name, loc)

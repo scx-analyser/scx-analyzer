@@ -222,6 +222,75 @@ class PinnedRunTest(unittest.TestCase):
         self.assertIn("kernel/sched/ext.c:6: scx_bpf_ghost in set_a has no __bpf_kfunc", err)
         self.assertNotIn("scx_bpf_foo", err)
 
+    def write_extra(self, name):
+        """An extra source file on disk that would add scx_bpf_extra if scanned."""
+        (self.kernel / "kernel" / "sched" / name).write_text(textwrap.dedent("""\
+            __bpf_kfunc void scx_bpf_extra(void)
+            {
+            }
+            BTF_KFUNCS_START(set_x)
+            BTF_ID_FLAGS(func, scx_bpf_extra)
+            BTF_KFUNCS_END(set_x)
+        """))
+
+    def assertPinnedOutput(self):
+        code, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        csv = self.out.read_text()
+        self.assertNotIn("scx_bpf_extra", csv)
+        self.assertEqual(len(csv.splitlines()), 2, csv)
+        self.assertIn("(kernel v0.1 (", err)
+
+    def test_untracked_source_not_scanned(self):
+        self.write_extra("untracked.c")
+        self.write_extra("untracked.h")
+        self.assertEqual(self.git("status", "--porcelain", "--untracked-files=no"), "")
+        self.assertPinnedOutput()
+
+    def test_ignored_source_not_scanned(self):
+        (self.kernel / ".git" / "info" / "exclude").write_text("ignored.*\n")
+        self.write_extra("ignored.c")
+        self.write_extra("ignored.h")
+        self.git("check-ignore", "-q", "kernel/sched/ignored.c")
+        self.assertEqual(self.git("status", "--porcelain", "--untracked-files=all"), "")
+        self.assertPinnedOutput()
+
+    def test_assume_unchanged_edit_not_scanned(self):
+        self.git("update-index", "--assume-unchanged", "kernel/sched/ext.c")
+        self.write_extra("ext.c")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertPinnedOutput()
+
+    def test_untracked_source_scanned_with_override(self):
+        self.write_extra("untracked.c")
+        self.write_kernel(KERNEL_C + "/* edit */\n")
+        code, err = self.run_main("--allow-kernel-mismatch")
+        self.assertEqual(code, 0, err)
+        self.assertIn("scx_bpf_extra", self.out.read_text())
+        self.assertIn("kernel unpinned", err)
+
+    def break_index(self):
+        """Make git status fail (the index is unreadable) while HEAD still resolves."""
+        self.write_kernel(KERNEL_C.replace("scx_bpf_foo", "scx_bpf_extra"))
+        (self.kernel / ".git" / "index").write_bytes(b"not an index")
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.git("status", "--porcelain")
+
+    def test_failed_status_fails_and_keeps_output(self):
+        self.out.write_text("previous output\n")
+        self.break_index()
+        code, err = self.run_main()
+        self.assertNotIn(code, (0, None), err)
+        self.assertIn("git status failed", err)
+        self.assertEqual(self.out.read_text(), "previous output\n")
+
+    def test_failed_status_only_warns_with_override(self):
+        self.break_index()
+        code, err = self.run_main("--allow-kernel-mismatch")
+        self.assertEqual(code, 0, err)
+        self.assertIn("warning: git status failed", err)
+        self.assertIn("kernel unpinned", err)
+
     def test_override_only_warns(self):
         self.write_kernel(KERNEL_C + "\n")
         self.git("commit", "-q", "-am", "v1")
