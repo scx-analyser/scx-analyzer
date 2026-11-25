@@ -103,6 +103,9 @@ def iter_lines(rule: dict):
         yield "references", ref
     for ref in rule.get("enforcement", {}).get("sites", []):
         yield "enforcement.sites", ref
+    for pred in rule.get("requires", {}).get("predicates", []):
+        if "evaluated_at" in pred:
+            yield "requires.predicates.evaluated_at", pred["evaluated_at"]
     for k, ob in enumerate(rule.get("obligations", [])):
         base = f"obligations[{k}]"
         for s in ob.get("sites", []):

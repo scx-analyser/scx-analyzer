@@ -259,6 +259,15 @@ class CatalogValidatorTests(unittest.TestCase):
             {"function": "f", "file": "kernel/sched/ext.c", "line": 10, "end_line": 9}])]
         self.assert_fails(doc, "has end_line < line")
 
+    def test_rule_predicate_end_line_before_line_rejected(self):
+        doc = catalog()
+        pred = {"expr": "ops_cpu_valid(sch, cpu, where)", "on_failure": "return",
+                "evaluated_at": {"function": "write_state", "file": "kernel/sched/ext.c", "line": 20, "end_line": 10}}
+        rule0(doc)["requires"]["predicates"] = [pred]
+        self.assert_fails(doc, "requires.predicates.evaluated_at: kernel/sched/ext.c:20 has end_line < line")
+        pred["evaluated_at"]["end_line"] = 20
+        self.assert_ok(doc)
+
     # roles
 
     def test_protection_rule_needs_obligations(self):
