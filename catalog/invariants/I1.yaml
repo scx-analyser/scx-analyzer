@@ -1,0 +1,1109 @@
+# Invariant family I1 - locking requirements for protected scheduler-state writes.
+#
+# Source of truth: Linux v7.1 (commit below), the course kernel: kernel/sched/ext.c,
+# kernel/sched/ext_idle.c, kernel/sched/ext_internal.h, kernel/sched/sched.h,
+# include/linux/sched/ext.h, kernel/bpf/{verifier,btf}.c. Write-up: I1.md.
+#
+# Structure: one family entry (id I1, the id checker plug-ins register under and
+# findings report) with two kinds of rules:
+# - role: protection - the invariant proper. Each obligation binds one write
+#   (struct, fields, instance, op) at named source sites to the specific lock
+#   instance / predicate that protects it, with a basis (checked, documented,
+#   observed, hypothesis) and evidence. Hypotheses live only in draft rules.
+#   I1.nonlocal_dsq.dsq_lock and I1.local_dsq.rq_lock carry the end-to-end
+#   call paths of the worked example scx_bpf_dsq_move_to_local___v2.
+# - role: entry_state - supporting information for C2/C3: calling contexts
+#   (kfunc sets, callbacks, program types) and locks held on callback entry.
+#   These are not the invariant; they say which locks are already held when a
+#   kfunc's path starts. Every sched_ext kfunc registered in v7.1 (59 unique
+#   names) appears in exactly one entry_state rule; I1.bpf_spin_lock.no_calls
+#   and I1.prog_type.gate additionally apply to all ("*").
+#
+# Conventions:
+# - Expressions in obligations (access.instance, lock instance, when, predicates)
+#   are in the scope of the site function; in paths, in the step's function.
+# - In entry_state rules, lock `rq` without instance = the rq the callback was
+#   invoked with (C2's "callback's rq"): this CPU's rq for dispatch /
+#   cpu_release / cpu_acquire, task_rq(p) for enqueue and the other task ops.
+#   not_held at callback_entry is the documented precondition of the cited call
+#   sites, not an object-specific absence fact for every ambient rq.
+# - "UNLOCKED ops" = the callbacks mapped to SCX_KF_ALLOW_UNLOCKED in
+#   scx_kf_allow_flags[] (ext.c:9833-9849).
+# - enforcement.expected counts only checks active in production kernels;
+#   lockdep_assert_*() is mechanism `lockdep` and never makes a rule "runtime".
+# - v7.1 has no current->scx.kf_mask / scx_kf_allowed(); per-op context
+#   restriction is verifier-time (ext.c:9808-9917).
+kernel_version: "v7.1"
+kernel_commit: 8cd9520d35a6c38db6567e97dd93b1f11f185dc6
+invariants:
+  - id: I1
+    title: "Shared scheduler state written along sched_ext kfunc call paths is modified only under the lock (or guard) that protects it"
+    description: >-
+      Locking requirements for protected scheduler-state writes in Linux v7.1.
+      For the shared fields that sched_ext kfuncs modify, directly or along
+      their kernel call paths (DSQ queues and counters, a task's DSQ linkage,
+      rq->scx fields, p->scx.ops_state, p->scx.slice / dsq_vtime, the
+      direct-dispatch and dispatch-buffer state), each protection rule names the
+      write sites and the specific lock instance or predicate required there,
+      with the kernel evidence (lockdep assertions, acquisitions on the path,
+      kernel comments). Calling-context rules are kept as supporting entry state
+      (role entry_state). See I1.md.
+    category: context_locking
+    rules:
+      # ------------------------------------------------------------------
+      # Protection rules (the invariant)
+      # ------------------------------------------------------------------
+      - id: I1.nonlocal_dsq.dsq_lock
+        title: "A non-local DSQ's queue state and a task's link into it are written with that DSQ's lock held"
+        description: >-
+          For user, global and bypass DSQs (dsq->id != SCX_DSQ_LOCAL) the list,
+          priority tree, nr, seq and first_task of the DSQ, and the queued task's
+          dsq_list / dsq_priq / dsq_flags / dsq_seq / dsq links, are modified only
+          inside dsq->lock. dispatch_enqueue() takes the lock itself; every caller
+          of task_unlink_from_dsq() on a non-local DSQ either takes it or asserts
+          it. dsq->nr is written with WRITE_ONCE() because
+          scx_bpf_dsq_nr_queued() reads it without the lock (ext.c:1369), and
+          first_task with rcu_assign_pointer() for the lockless peek; those
+          readers do not weaken the writer requirement. Local DSQs are covered by
+          I1.local_dsq.rq_lock.
+        category: context_locking
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: scx_dispatch_q, fields: [list, priq, nr, seq, first_task]}
+          - {struct: task_struct, fields: [scx.dsq_list.node, scx.dsq_priq, scx.dsq_flags, scx.dsq_seq, scx.dsq]}
+        access: write
+        requires:
+          locks:
+            - {lock: bpf_spin_lock, state: not_held, where: access_site, note: "kfunc-wide context condition (I1.bpf_spin_lock.no_calls), not field protection"}
+        obligations:
+          - id: enqueue_dsq
+            access: {struct: scx_dispatch_q, fields: [list, priq, nr, seq, first_task], op: write, instance: dsq}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1568, end_line: 1613, note: "rb_add 1568, list_add* 1579-1603, first_task 1584/1596/1605, seq 1610, dsq_inc_nr 1613 (nr at 1370)"}
+            when: "dsq->id != SCX_DSQ_LOCAL"
+            requires:
+              locks:
+                - {lock: dsq, instance: dsq, state: held}
+            basis: observed
+            evidence:
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 1528, end_line: 1530, symbol: dispatch_enqueue, note: "if (!is_local) raw_spin_lock_nested(&dsq->lock)"}
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 1535, end_line: 1537, symbol: dispatch_enqueue, note: "destroyed DSQ: unlock, switch to the global DSQ, lock it"}
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 1635, symbol: dispatch_enqueue, note: "released only after the writes"}
+          - id: enqueue_task_link
+            access: {struct: task_struct, fields: [scx.dsq_list.node, scx.dsq_priq, scx.dsq_seq, scx.dsq], op: write, instance: p}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1568, end_line: 1614, note: "dsq_priq 1568, dsq_list.node 1579-1603, dsq_seq 1611, p->scx.dsq 1614"}
+            when: "dsq->id != SCX_DSQ_LOCAL"
+            requires:
+              locks:
+                - {lock: dsq, instance: dsq, state: held}
+            basis: observed
+            evidence:
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 1528, end_line: 1530, symbol: dispatch_enqueue}
+            note: "p's task_rq lock is not required here: dispatch_enqueue() is also reached from finish_dispatch() (2746) on the dispatching CPU, where p is owned through SCX_OPSS_DISPATCHING, not through its rq lock."
+          - id: unlink_dsq
+            access: {struct: scx_dispatch_q, fields: [list, priq, nr, first_task], op: write, instance: dsq}
+            sites:
+              - {function: task_unlink_from_dsq, file: kernel/sched/ext.c, line: 1652, end_line: 1664, note: "rb_erase 1652, list_del_init 1657, dsq_dec_nr 1658 (nr at 1408), first_task 1664"}
+            when: "dsq->id != SCX_DSQ_LOCAL"
+            requires:
+              locks:
+                - {lock: dsq, instance: dsq, state: held}
+            basis: observed
+            evidence:
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 1695, end_line: 1696, symbol: dispatch_dequeue, note: "caller 1704 takes dsq->lock when !is_local"}
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 1729, symbol: dispatch_dequeue_locked, note: "caller 1731"}
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 2412, symbol: unlink_dsq_and_lock_src_rq, note: "caller 2415"}
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 2466, symbol: move_task_between_dsqs, note: "caller 2489"}
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 2525, symbol: consume_dispatch_q, note: "caller 2542"}
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 588, symbol: nldsq_next_task, note: "reached from 1663 when first_task == p"}
+            paths:
+              - root: scx_bpf_dsq_move_to_local___v2
+                entry:
+                  - {function: balance_one, file: kernel/sched/ext.c, line: 2890, note: "lockdep_assert_rq_held(rq); SCX_RQ_IN_BALANCE set at 2891"}
+                  - {function: scx_dispatch_sched, file: kernel/sched/ext.c, line: 2844, note: "dspc->rq = rq (2827); SCX_CALL_OP(sch, dispatch, rq, ...) -> update_locked_rq() asserts rq (465-466)"}
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8538, call: "consume_dispatch_q(sch, dspc->rq, dsq, enq_flags)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: consume_dispatch_q, file: kernel/sched/ext.c, line: 2542, call: "task_unlink_from_dsq(p, dsq)", held: [{lock: rq, instance: rq}, {lock: dsq, instance: dsq}], note: "same-rq branch (rq == task_rq(p), 2541); dsq->lock taken at 2525"}
+                  - {function: task_unlink_from_dsq, file: kernel/sched/ext.c, line: 1658, held: [{lock: rq, instance: task_rq(p)}, {lock: dsq, instance: dsq}]}
+              - root: scx_bpf_dsq_move_to_local___v2
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8538, call: "consume_dispatch_q(sch, dspc->rq, dsq, enq_flags)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: consume_dispatch_q, file: kernel/sched/ext.c, line: 2549, call: "consume_remote_task(rq, p, enq_flags, dsq, task_rq)", held: [{lock: rq, instance: rq}, {lock: dsq, instance: dsq}], note: "remote branch, after task_can_run_on_remote_rq() (2548)"}
+                  - {function: consume_remote_task, file: kernel/sched/ext.c, line: 2432, call: "unlink_dsq_and_lock_src_rq(p, dsq, src_rq)", held: [{lock: dsq, instance: dsq}], note: "this_rq unlocked at 2430"}
+                  - {function: unlink_dsq_and_lock_src_rq, file: kernel/sched/ext.c, line: 2415, call: "task_unlink_from_dsq(p, dsq)", held: [{lock: dsq, instance: dsq}], note: "lockdep_assert_held(&dsq->lock) 2412; then holding_cpu = cpu (2416), unlock dsq (2418), lock src_rq (2419)"}
+                  - {function: task_unlink_from_dsq, file: kernel/sched/ext.c, line: 1658, held: [{lock: dsq, instance: dsq}], note: "no rq lock held: the DSQ lock alone protects the unlink"}
+          - id: unlink_task_link
+            access: {struct: task_struct, fields: [scx.dsq_list.node, scx.dsq_priq], op: write, instance: p}
+            sites:
+              - {function: task_unlink_from_dsq, file: kernel/sched/ext.c, line: 1652, end_line: 1657}
+            when: "dsq->id != SCX_DSQ_LOCAL"
+            requires:
+              locks:
+                - {lock: dsq, instance: dsq, state: held}
+            basis: observed
+            evidence:
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 2412, symbol: unlink_dsq_and_lock_src_rq}
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 2525, symbol: consume_dispatch_q}
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 1696, symbol: dispatch_dequeue}
+          - id: dsq_flags
+            access: {struct: task_struct, fields: [scx.dsq_flags], op: write, instance: p}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1567}
+              - {function: task_unlink_from_dsq, file: kernel/sched/ext.c, line: 1654}
+            requires:
+              locks:
+                - {lock: dsq, instance: dsq, state: held}
+            basis: documented
+            evidence:
+              - {kind: kernel_comment, file: include/linux/sched/ext.h, line: 195, note: "u32 dsq_flags; /* protected by DSQ lock */"}
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 1529, symbol: dispatch_enqueue}
+            note: "Only PRIQ DSQs set the flag, and built-in DSQs cannot be PRIQ (1541-1552), so these sites are always on a non-local DSQ."
+        applies_to: [scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2, scx_bpf_dsq_move, scx_bpf_dsq_move_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [lock, lockdep]
+          sites:
+            - {file: kernel/sched/ext.c, line: 1528, end_line: 1530, symbol: dispatch_enqueue}
+            - {file: kernel/sched/ext.c, line: 2525, symbol: consume_dispatch_q}
+            - {file: kernel/sched/ext.c, line: 8401, symbol: scx_dsq_move}
+            - {file: kernel/sched/ext.c, line: 2412, symbol: unlink_dsq_and_lock_src_rq, note: "lockdep only"}
+        references:
+          - {file: include/linux/sched/ext.h, line: 81, end_line: 94, symbol: scx_dispatch_q}
+          - {file: kernel/sched/ext.c, line: 1518, end_line: 1644, symbol: dispatch_enqueue}
+          - {file: kernel/sched/ext.c, line: 1646, end_line: 1666, symbol: task_unlink_from_dsq}
+          - {file: kernel/sched/ext.c, line: 2512, end_line: 2557, symbol: consume_dispatch_q}
+        notes: "applies_to lists the kfuncs whose own call path reaches these writes (move_to_local via consume_dispatch_q and flush_dispatch_buf -> finish_dispatch -> dispatch_enqueue; dsq_move* via move_task_between_dsqs). scx_bpf_dsq_insert* only record the request; the write happens later in the core (direct_dispatch / finish_dispatch)."
+
+      - id: I1.local_dsq.rq_lock
+        title: "A local DSQ and a task's link into it are written with the owning rq's lock held"
+        description: >-
+          Local DSQs (rq->scx.local_dsq) have no DSQ lock in use: they are
+          protected by their rq's lock (ext.c:2574-2576). move_local_task_to_local_dsq()
+          asserts the destination rq lock (and the source DSQ lock it is moving
+          from); dispatch_enqueue() on a local DSQ relies on the caller holding the
+          owning rq, which direct_dispatch() guarantees by deferring remote local
+          DSQs (1830-1834) and dispatch_to_local_dsq() by locking the target rq.
+        category: context_locking
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: scx_dispatch_q, fields: [list, nr, seq]}
+          - {struct: task_struct, fields: [scx.dsq_list.node, scx.dsq]}
+          - {struct: rq, fields: [scx.nr_immed]}
+        access: write
+        requires:
+          locks:
+            - {lock: bpf_spin_lock, state: not_held, where: access_site, note: "kfunc-wide context condition, not field protection"}
+        obligations:
+          - id: move_local_dst
+            access: {struct: scx_dispatch_q, fields: [list, nr], op: write, instance: dst_dsq}
+            sites:
+              - {function: move_local_task_to_local_dsq, file: kernel/sched/ext.c, line: 2261, end_line: 2266, note: "list_add[_tail] 2262/2264, dsq_inc_nr 2266"}
+            requires:
+              locks:
+                - {lock: rq, instance: dst_rq, state: held}
+            basis: checked
+            evidence:
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 2257, symbol: move_local_task_to_local_dsq, note: "lockdep_assert_rq_held(dst_rq)"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2574, end_line: 2576, symbol: dispatch_to_local_dsq, note: "local DSQs are protected with rq locks"}
+            paths:
+              - root: scx_bpf_dsq_move_to_local___v2
+                entry:
+                  - {function: balance_one, file: kernel/sched/ext.c, line: 2890, note: "lockdep_assert_rq_held(rq)"}
+                  - {function: scx_dispatch_sched, file: kernel/sched/ext.c, line: 2844, note: "SCX_CALL_OP(sch, dispatch, rq, ...)"}
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8538, call: "consume_dispatch_q(sch, dspc->rq, dsq, enq_flags)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: consume_dispatch_q, file: kernel/sched/ext.c, line: 2543, call: "move_local_task_to_local_dsq(sch, p, enq_flags, dsq, rq)", held: [{lock: rq, instance: rq}, {lock: dsq, instance: dsq}]}
+                  - {function: move_local_task_to_local_dsq, file: kernel/sched/ext.c, line: 2266, held: [{lock: rq, instance: dst_rq}, {lock: dsq, instance: src_dsq}], note: "dsq->lock dropped by the caller at 2544 after return"}
+          - id: move_local_task_link
+            access: {struct: task_struct, fields: [scx.dsq_list.node, scx.dsq], op: write, instance: p}
+            sites:
+              - {function: move_local_task_to_local_dsq, file: kernel/sched/ext.c, line: 2262, end_line: 2267}
+            requires:
+              locks:
+                - {lock: rq, instance: dst_rq, state: held}
+                - {lock: dsq, instance: src_dsq, state: held}
+            basis: checked
+            evidence:
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 2256, end_line: 2257, symbol: move_local_task_to_local_dsq, note: "both asserted: src_dsq->lock and dst_rq"}
+            paths:
+              - root: scx_bpf_dsq_move_to_local___v2
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8538, call: "consume_dispatch_q(sch, dspc->rq, dsq, enq_flags)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: consume_dispatch_q, file: kernel/sched/ext.c, line: 2543, call: "move_local_task_to_local_dsq(sch, p, enq_flags, dsq, rq)", held: [{lock: rq, instance: rq}, {lock: dsq, instance: dsq}]}
+                  - {function: move_local_task_to_local_dsq, file: kernel/sched/ext.c, line: 2267, held: [{lock: rq, instance: dst_rq}, {lock: dsq, instance: src_dsq}]}
+          - id: immed_count
+            access: {struct: rq, fields: [scx.nr_immed], op: write, instance: "container_of(dsq, struct rq, scx.local_dsq)"}
+            sites:
+              - {function: dsq_inc_nr, file: kernel/sched/ext.c, line: 1394}
+              - {function: dsq_dec_nr, file: kernel/sched/ext.c, line: 1417}
+            when: "p->scx.flags & SCX_TASK_IMMED"
+            requires:
+              locks:
+                - {lock: rq, instance: "container_of(dsq, struct rq, scx.local_dsq)", state: held}
+            basis: documented
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2574, end_line: 2576, note: "local DSQs are protected with rq locks; IMMED tasks are only counted on a local DSQ (1381-1392, 1413)"}
+          - id: enqueue_local
+            access: {struct: scx_dispatch_q, fields: [list, nr, seq], op: write, instance: dsq}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1593, end_line: 1613}
+            when: "dsq->id == SCX_DSQ_LOCAL"
+            requires:
+              locks:
+                - {lock: rq, instance: "container_of(dsq, struct rq, scx.local_dsq)", state: held}
+            basis: documented
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2574, end_line: 2576, symbol: dispatch_to_local_dsq}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1830, end_line: 1834, symbol: direct_dispatch, note: "remote local DSQ cannot be locked here, so the enqueue is deferred"}
+            note: "dispatch_enqueue() itself takes no lock for a local DSQ (1528) and asserts none; the requirement is on its callers. Not every caller was audited as observed; basis is the kernel comment."
+        applies_to: [scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2, scx_bpf_dsq_move, scx_bpf_dsq_move_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [lock, lockdep]
+          sites:
+            - {file: kernel/sched/ext.c, line: 2890, symbol: balance_one, note: "rq held for ops.dispatch (lockdep)"}
+            - {file: kernel/sched/ext.c, line: 2256, end_line: 2257, symbol: move_local_task_to_local_dsq, note: "lockdep"}
+            - {file: kernel/sched/ext.c, line: 2295, symbol: move_remote_task_to_local_dsq, note: "raw_spin_rq_lock(dst_rq)"}
+        references:
+          - {file: kernel/sched/ext.c, line: 2248, end_line: 2270, symbol: move_local_task_to_local_dsq}
+          - {file: kernel/sched/ext.c, line: 2566, end_line: 2580, symbol: dispatch_to_local_dsq, note: "kernel-doc"}
+          - {file: kernel/sched/sched.h, line: 793, end_line: 794, symbol: scx_rq, note: "local_dsq is embedded in struct scx_rq"}
+
+      - id: I1.rq_scx.rq_lock
+        title: "rq->scx fields written on kfunc paths (cpuperf_target, extra_enq_flags, flags) are written with that rq's lock held"
+        description: >-
+          scx_bpf_cpuperf_set() writes cpu_rq(cpu)->scx.cpuperf_target either
+          after taking that rq's lock or, when an rq is already tracked as locked,
+          only if it is that rq (scx_error and return otherwise).
+          move_remote_task_to_local_dsq(), reached from scx_bpf_dsq_move_to_local
+          and scx_bpf_dsq_move*, sets dst_rq->scx.extra_enq_flags right after
+          locking dst_rq. balance_one() sets rq->scx.flags under an asserted rq
+          lock before ops.dispatch. Sites outside kfunc paths are not covered
+          (e.g. scx_root_enable_workfn sets cpuperf_target for every CPU at 6879
+          without rq locks, before the scheduler runs).
+        category: context_locking
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: rq, fields: [scx.cpuperf_target, scx.extra_enq_flags, scx.flags]}
+        access: write
+        requires:
+          locks:
+            - {lock: bpf_spin_lock, state: not_held, where: access_site}
+        obligations:
+          - id: cpuperf_target
+            access: {struct: rq, fields: [scx.cpuperf_target], op: write, instance: rq}
+            sites:
+              - {function: scx_bpf_cpuperf_set, file: kernel/sched/ext.c, line: 9458, note: "rq = cpu_rq(cpu) (9437)"}
+            requires:
+              locks:
+                - {lock: rq, instance: rq, state: held}
+              predicates:
+                - expr: "!locked_rq || rq == locked_rq"
+                  captures:
+                    - {var: locked_rq, expr: "scx_locked_rq()", function: scx_bpf_cpuperf_set, file: kernel/sched/ext.c, line: 9437}
+                  evaluated_at: {function: scx_bpf_cpuperf_set, file: kernel/sched/ext.c, line: 9444}
+                  checked_by: [scx_bpf_cpuperf_set]
+                  on_failure: return
+                  note: "scx_error('Invalid target CPU') at 9445, return at 9446 (ABBA prevention)"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 9444, end_line: 9446, symbol: scx_bpf_cpuperf_set}
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 9453, end_line: 9455, symbol: scx_bpf_cpuperf_set, note: "rq_lock_irqsave(rq) when no rq is tracked as locked; released 9461-9462"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 9440, end_line: 9452, symbol: scx_bpf_cpuperf_set}
+            note: "When locked_rq == rq the lock is the caller's, as tracked by SCX_CALL_OP*() (update_locked_rq() asserts it under lockdep, 465-466). scx_locked_rq_state is only maintained around SCX ops: a TRACING program running while the core holds an rq lock outside an SCX op sees NULL and would rq_lock_irqsave() a possibly held rq. Potential deadlock, needs a test."
+          - id: extra_enq_flags
+            access: {struct: rq, fields: [scx.extra_enq_flags], op: write, instance: dst_rq}
+            sites:
+              - {function: move_remote_task_to_local_dsq, file: kernel/sched/ext.c, line: 2304, end_line: 2306}
+            requires:
+              locks:
+                - {lock: rq, instance: dst_rq, state: held}
+            basis: documented
+            evidence:
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 2294, end_line: 2295, symbol: move_remote_task_to_local_dsq, note: "raw_spin_rq_unlock(src_rq); raw_spin_rq_lock(dst_rq)"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2297, end_line: 2300, symbol: move_remote_task_to_local_dsq, note: "'As we own @rq, we can pass them through @rq->scx.extra_enq_flags'"}
+            paths:
+              - root: scx_bpf_dsq_move_to_local___v2
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8538, call: "consume_dispatch_q(sch, dspc->rq, dsq, enq_flags)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: consume_dispatch_q, file: kernel/sched/ext.c, line: 2549, call: "consume_remote_task(rq, p, enq_flags, dsq, task_rq)", held: [{lock: rq, instance: rq}, {lock: dsq, instance: dsq}]}
+                  - {function: consume_remote_task, file: kernel/sched/ext.c, line: 2433, call: "move_remote_task_to_local_dsq(p, enq_flags, src_rq, this_rq)", held: [{lock: rq, instance: src_rq}]}
+                  - {function: move_remote_task_to_local_dsq, file: kernel/sched/ext.c, line: 2304, held: [{lock: rq, instance: dst_rq}], note: "src_rq dropped and dst_rq (= this_rq) taken at 2294-2295"}
+          - id: balance_flags
+            access: {struct: rq, fields: [scx.flags], op: write, instance: rq}
+            sites:
+              - {function: balance_one, file: kernel/sched/ext.c, line: 2891, end_line: 2892}
+            requires:
+              locks:
+                - {lock: rq, instance: rq, state: held}
+            basis: checked
+            evidence:
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 2890, symbol: balance_one}
+        applies_to: [scx_bpf_cpuperf_set, scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2, scx_bpf_dsq_move, scx_bpf_dsq_move_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [lock, scx_error, lockdep]
+          sites:
+            - {file: kernel/sched/ext.c, line: 9444, end_line: 9446, symbol: scx_bpf_cpuperf_set, note: "scx_error + return"}
+            - {file: kernel/sched/ext.c, line: 9453, end_line: 9455, symbol: scx_bpf_cpuperf_set, note: "rq_lock_irqsave"}
+            - {file: kernel/sched/ext.c, line: 2295, symbol: move_remote_task_to_local_dsq}
+        references:
+          - {file: kernel/sched/sched.h, line: 793, end_line: 824, symbol: scx_rq}
+          - {file: kernel/sched/ext.c, line: 456, symbol: scx_locked_rq_state}
+          - {file: kernel/sched/ext.c, line: 2281, end_line: 2307, symbol: move_remote_task_to_local_dsq}
+
+      - id: I1.ops_state.atomic
+        title: "p->scx.ops_state is written only with atomics: QUEUEING under the task's rq lock, exits with release, claims with cmpxchg"
+        description: >-
+          ops_state hands a task between the SCX core and the BPF scheduler. It is
+          never written with a plain store. QUEUEING is entered (and left) under
+          the task's rq lock; leaving QUEUEING or DISPATCHING uses
+          atomic_long_set_release() to pair with waiters' load_acquire; claims
+          (QUEUED -> DISPATCHING in finish_dispatch, guarded by the qseq
+          captured at insert time; QUEUED -> NONE in ops_dequeue, under p's rq
+          lock with no dispatch snapshot) use atomic_long_try_cmpxchg(). The legal transitions
+          themselves are I2 (ownership); this rule records the write discipline
+          on the kfunc paths (scx_bpf_dsq_move_to_local -> flush_dispatch_buf ->
+          finish_dispatch / dispatch_enqueue / dispatch_to_local_dsq).
+        category: context_locking
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: task_struct, fields: [scx.ops_state]}
+        access: write
+        requires:
+          locks:
+            - {lock: bpf_spin_lock, state: not_held, where: access_site}
+        obligations:
+          - id: queueing_entry
+            access: {struct: task_struct, fields: [scx.ops_state], op: atomic, instance: p}
+            sites:
+              - {function: do_enqueue_task, file: kernel/sched/ext.c, line: 1942}
+            requires:
+              locks:
+                - {lock: rq, instance: rq, state: held, note: "do_enqueue_task(rq, p, ...) is called with p's rq (enqueue_task_scx 2061)"}
+            basis: documented
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext_internal.h, line: 1276, end_line: 1280, note: "QUEUEING: the task's rq lock is held during this state"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2089, end_line: 2093, symbol: ops_dequeue, note: "QUEUEING started and finished under p's rq lock; BUG() if seen"}
+          - id: exit_release
+            access: {struct: task_struct, fields: [scx.ops_state], op: atomic, ordering: release, instance: p}
+            sites:
+              - {function: dispatch_enqueue, file: kernel/sched/ext.c, line: 1643}
+              - {function: direct_dispatch, file: kernel/sched/ext.c, line: 1849}
+              - {function: direct_dispatch, file: kernel/sched/ext.c, line: 1854}
+              - {function: do_enqueue_task, file: kernel/sched/ext.c, line: 1964}
+              - {function: dispatch_to_local_dsq, file: kernel/sched/ext.c, line: 2622}
+            basis: documented
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext_internal.h, line: 1303, end_line: 1306, note: "transitions out of QUEUEING / DISPATCHING must use atomic_long_set_release()"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 1638, end_line: 1640, symbol: dispatch_enqueue}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2621, symbol: dispatch_to_local_dsq}
+          - id: dispatch_claim_cmpxchg
+            access: {struct: task_struct, fields: [scx.ops_state], op: atomic, ordering: full, instance: p}
+            sites:
+              - {function: finish_dispatch, file: kernel/sched/ext.c, line: 2724, end_line: 2725}
+            requires:
+              predicates:
+                - expr: "(opss & SCX_OPSS_QSEQ_MASK) == qseq_at_dispatch"
+                  captures:
+                    - {var: qseq_at_dispatch, expr: "atomic_long_read(&p->scx.ops_state) & SCX_OPSS_QSEQ_MASK", function: scx_dsq_insert_commit, file: kernel/sched/ext.c, line: 8145, note: "recorded in the dispatch buffer entry"}
+                  evaluated_at: {function: finish_dispatch, file: kernel/sched/ext.c, line: 2708}
+                  checked_by: [finish_dispatch]
+                  on_failure: return
+                  note: "stale request after dequeue/re-enqueue is dropped (2709); ops_dequeue has no such snapshot, see dequeue_claim_cmpxchg"
+            basis: documented
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2717, end_line: 2723, symbol: finish_dispatch, note: "claim @p by atomically transitioning it from QUEUED to DISPATCHING"}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 2708, end_line: 2709, symbol: finish_dispatch}
+            paths:
+              - root: scx_bpf_dsq_move_to_local___v2
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8530, call: "flush_dispatch_buf(sch, dspc->rq)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: flush_dispatch_buf, file: kernel/sched/ext.c, line: 2757, call: "finish_dispatch(sch, rq, ent->task, ent->qseq, ent->dsq_id, ent->enq_flags)", held: [{lock: rq, instance: rq}]}
+                  - {function: finish_dispatch, file: kernel/sched/ext.c, line: 2724, held: [{lock: rq, instance: rq}], note: "rq is the dispatching CPU's rq, not necessarily task_rq(p); ownership comes from the cmpxchg"}
+          - id: dequeue_claim_cmpxchg
+            access: {struct: task_struct, fields: [scx.ops_state], op: atomic, ordering: full, instance: p}
+            sites:
+              - {function: ops_dequeue, file: kernel/sched/ext.c, line: 2109, end_line: 2110}
+            requires:
+              locks:
+                - {lock: rq, instance: rq, state: held, note: "ops_dequeue(rq, p, ...) runs under p's rq lock (dequeue_task_scx 2166, core-sched pick 2974)"}
+              predicates:
+                - expr: "READ_ONCE(p->scx.flags) & SCX_TASK_IN_CUSTODY"
+                  evaluated_at: {function: ops_dequeue, file: kernel/sched/ext.c, line: 2104}
+                  checked_by: [ops_dequeue]
+                  on_failure: continue
+                  note: "cpu_relax(); goto retry (2105-2106) until finish_dispatch publishes NONE; no dispatch qseq snapshot is involved: QUEUED -> NONE is attempted on ops_state freshly read with acquire (2083)"
+            basis: documented
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2089, end_line: 2093, symbol: ops_dequeue, note: "caller holds p's rq lock, so QUEUEING cannot be observed"}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2095, end_line: 2103, symbol: ops_dequeue, note: "QUEUED implies custody; retry is bounded"}
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 2104, end_line: 2106, symbol: ops_dequeue}
+        applies_to: [scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2]
+        enforcement:
+          expected: runtime
+          mechanisms: [atomic, lock, warn]
+          sites:
+            - {file: kernel/sched/ext.c, line: 1941, end_line: 1942, symbol: do_enqueue_task, note: "WARN unless NONE, then set QUEUEING"}
+            - {file: kernel/sched/ext.c, line: 2724, end_line: 2725, symbol: finish_dispatch}
+            - {file: kernel/sched/ext.c, line: 2109, end_line: 2110, symbol: ops_dequeue}
+        references:
+          - {file: kernel/sched/ext_internal.h, line: 1239, end_line: 1310, note: "ops_state protocol and memory ordering"}
+          - {file: include/linux/sched/ext.h, line: 189, note: "atomic_long_t ops_state"}
+
+      - id: I1.dsq_insert.commit_guards
+        title: "scx_bpf_dsq_insert*: direct-dispatch writes need p == the captured ddsp_task; dispatch-buffer writes need a free slot"
+        description: >-
+          scx_dsq_insert_commit() captures ddsp_task = direct_dispatch_task once
+          (8132). Direct path (ddsp_task != NULL, ops.select_cpu / ops.enqueue):
+          mark_direct_dispatch() first overwrites the live per-CPU variable with
+          ERR_PTR(-ESRCH) (1776) and then compares p against the captured
+          ddsp_task (1779); only if they match does it write p->scx.ddsp_dsq_id /
+          ddsp_enq_flags (1793-1794), otherwise scx_error() and an explicit
+          return (1787). A fresh read of direct_dispatch_task at that point is not
+          the snapshot. Buffered path (ddsp_task == NULL, ops.dispatch): the
+          dispatch-buffer slot dspc->buf[cursor] and dspc->cursor are written only
+          if cursor < dsp_max_batch (8138-8140, explicit return). Both checks come
+          after the p->scx.slice / dsq_vtime writes (8207-8210, 8234-8238), see
+          I1.task_slice_vtime.unlocked_writers.
+        category: context_locking
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: task_struct, fields: [scx.ddsp_dsq_id, scx.ddsp_enq_flags]}
+          - {struct: scx_dsp_ctx, fields: [buf, cursor]}
+        access: write
+        requires:
+          locks:
+            - {lock: irqs_disabled, state: held, where: access_site, note: "lockdep_assert_irqs_disabled() in scx_dsq_insert_preamble() (8102); context condition"}
+        obligations:
+          - id: direct
+            access: {struct: task_struct, fields: [scx.ddsp_dsq_id, scx.ddsp_enq_flags], op: write, instance: p}
+            sites:
+              - {function: mark_direct_dispatch, file: kernel/sched/ext.c, line: 1793, end_line: 1794}
+            when: "ddsp_task != NULL"
+            requires:
+              predicates:
+                - expr: "p == ddsp_task"
+                  captures:
+                    - {var: ddsp_task, expr: "__this_cpu_read(direct_dispatch_task)", function: scx_dsq_insert_commit, file: kernel/sched/ext.c, line: 8132, note: "passed to mark_direct_dispatch() at 8134; the per-CPU variable is overwritten at 1776 before the compare"}
+                  evaluated_at: {function: mark_direct_dispatch, file: kernel/sched/ext.c, line: 1779}
+                  checked_by: [mark_direct_dispatch]
+                  on_failure: return
+                  note: "scx_error at 1781/1784, explicit return at 1787; IS_ERR(ddsp_task) = already direct-dispatched"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 1779, end_line: 1787, symbol: mark_direct_dispatch}
+              - {kind: warn_only, file: kernel/sched/ext.c, line: 1790, end_line: 1791, symbol: mark_direct_dispatch, note: "WARN_ON_ONCE unless the fields are still clear; the write proceeds"}
+          - id: buffered
+            access: {struct: scx_dsp_ctx, fields: [buf, cursor], op: write, instance: dspc}
+            sites:
+              - {function: scx_dsq_insert_commit, file: kernel/sched/ext.c, line: 8143, end_line: 8148}
+            when: "ddsp_task == NULL"
+            requires:
+              predicates:
+                - expr: "dspc->cursor < sch->dsp_max_batch"
+                  evaluated_at: {function: scx_dsq_insert_commit, file: kernel/sched/ext.c, line: 8138}
+                  checked_by: [scx_dsq_insert_commit]
+                  on_failure: return
+                  note: "scx_error('dispatch buffer overflow') 8139, return 8140"
+            basis: checked
+            evidence:
+              - {kind: runtime_check, file: kernel/sched/ext.c, line: 8138, end_line: 8140, symbol: scx_dsq_insert_commit}
+            note: "dspc is this CPU's sch->pcpu->dsp_ctx (8129); it is per-CPU, so no lock is involved."
+        applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, __scx_bpf_dsq_insert_vtime, scx_bpf_dsq_insert_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [guard, scx_error, warn, lockdep]
+          sites:
+            - {file: kernel/sched/ext.c, line: 1779, end_line: 1787, symbol: mark_direct_dispatch}
+            - {file: kernel/sched/ext.c, line: 8138, end_line: 8140, symbol: scx_dsq_insert_commit}
+        references:
+          - {file: kernel/sched/ext.c, line: 8126, end_line: 8149, symbol: scx_dsq_insert_commit}
+          - {file: kernel/sched/ext.c, line: 1766, end_line: 1795, symbol: mark_direct_dispatch}
+          - {file: kernel/sched/ext.c, line: 1944, end_line: 1950, symbol: do_enqueue_task, note: "direct_dispatch_task = p around ops.enqueue"}
+          - {file: kernel/sched/ext.c, line: 118, note: "direct_dispatch_task is a plain per-CPU variable"}
+
+      - id: I1.dsq_move.slice_vtime
+        title: "scx_bpf_dsq_move* write the moved task's slice / dsq_vtime with its rq lock and the source DSQ lock held"
+        description: >-
+          scx_dsq_move() locks task_rq(p) (from ops.dispatch by switching from
+          this_rq, otherwise directly) and then src_dsq->lock, re-checks that p is
+          still on src_dsq (nldsq_cursor_lost_task(), which asserts both locks),
+          and only then applies the iterator's vtime / slice to p while p is still
+          queued, before moving it. The kernel comment states this is safe because
+          the DSQ is locked.
+        category: context_locking
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: task_struct, fields: [scx.slice, scx.dsq_vtime]}
+        access: write
+        requires:
+          locks:
+            - {lock: bpf_spin_lock, state: not_held, where: access_site}
+        obligations:
+          - id: move_update
+            access: {struct: task_struct, fields: [scx.slice, scx.dsq_vtime], op: write, instance: p}
+            sites:
+              - {function: scx_dsq_move, file: kernel/sched/ext.c, line: 8417, end_line: 8420}
+            requires:
+              locks:
+                - {lock: rq, instance: src_rq, state: held, note: "src_rq = task_rq(p) (8385)"}
+                - {lock: dsq, instance: src_dsq, state: held}
+            basis: checked
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 8412, end_line: 8415, symbol: scx_dsq_move, note: "@p is still on $src_dsq but this is safe as we're locking it"}
+              - {kind: acquired_on_path, file: kernel/sched/ext.c, line: 8391, end_line: 8401, symbol: scx_dsq_move, note: "lock src_rq (8394 or 8397), then src_dsq->lock (8401)"}
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 677, end_line: 678, symbol: nldsq_cursor_lost_task, note: "nldsq_cursor_lost_task(&kit->cursor, src_rq, src_dsq, p) is called unconditionally at 8404, before the writes; it asserts src_rq (677) and src_dsq->lock (678)"}
+            paths:
+              - root: scx_bpf_dsq_move
+                steps:
+                  - {function: scx_dsq_move, file: kernel/sched/ext.c, line: 8420, held: [{lock: rq, instance: src_rq}, {lock: dsq, instance: src_dsq}]}
+        applies_to: [scx_bpf_dsq_move, scx_bpf_dsq_move_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [lock, lockdep]
+          sites:
+            - {file: kernel/sched/ext.c, line: 8391, end_line: 8401, symbol: scx_dsq_move}
+        references:
+          - {file: kernel/sched/ext.c, line: 8344, end_line: 8438, symbol: scx_dsq_move}
+        notes: "Correctness of the lock dance depends on SCX_RQ_IN_BALANCE (8389) meaning 'this_rq is held', i.e. on the static rule that ops.dispatch is the only rq-locked caller (I1.dsq_move.context)."
+
+      - id: I1.task_slice_vtime.unlocked_writers
+        title: "Draft: should BPF-initiated writes of p->scx.slice / dsq_vtime hold task_rq(p)?"
+        description: >-
+          Hypothesis, not established by the source. scx_bpf_task_set_slice() /
+          scx_bpf_task_set_dsq_vtime() (any set, so also TRACING / SYSCALL) store
+          the fields with only RCU and a scheduler-authority check
+          (scx_task_on_sched), no rq / DSQ lock and no context check (8844-8878).
+          scx_bpf_dsq_insert*() store them before the commit checks, under
+          whatever lock the calling callback holds (8207-8210, 8233-8238). The core
+          updates slice under the rq lock (update_curr_scx 1348) and the
+          dsq_move path under task_rq + DSQ lock (I1.dsq_move.slice_vtime). The
+          kernel declares both fields "BPF scheduler modifiable" and only warns
+          that changing dsq_vtime while queued may mangle the ordering
+          (include/linux/sched/ext.h:210-231). This neither demonstrates a race
+          nor shows that synchronization is unnecessary; it needs a test.
+        category: context_locking
+        status: draft
+        role: protection
+        objects:
+          - {struct: task_struct, fields: [scx.slice, scx.dsq_vtime]}
+        access: write
+        requires:
+          locks:
+            - {lock: bpf_spin_lock, state: not_held, where: access_site}
+        obligations:
+          - id: task_set
+            access: {struct: task_struct, fields: [scx.slice, scx.dsq_vtime], op: write, instance: p}
+            sites:
+              - {function: scx_bpf_task_set_slice, file: kernel/sched/ext.c, line: 8854}
+              - {function: scx_bpf_task_set_dsq_vtime, file: kernel/sched/ext.c, line: 8877}
+            requires:
+              locks:
+                - {lock: rq, instance: task_rq(p), state: held, note: "hypothesis; not required or checked by the kernel"}
+            basis: hypothesis
+            evidence:
+              - {kind: kernel_comment, file: include/linux/sched/ext.h, line: 210, end_line: 231, note: "fields documented as BPF-modifiable; no lock rule stated"}
+          - id: dsq_insert
+            access: {struct: task_struct, fields: [scx.slice, scx.dsq_vtime], op: write, instance: p}
+            sites:
+              - {function: scx_bpf_dsq_insert___v2, file: kernel/sched/ext.c, line: 8207, end_line: 8210}
+              - {function: scx_dsq_insert_vtime, file: kernel/sched/ext.c, line: 8233, end_line: 8238}
+            requires:
+              locks:
+                - {lock: rq, instance: task_rq(p), state: held, note: "hypothesis; from ops.dispatch p may be any task, whose rq is not held"}
+            basis: hypothesis
+            evidence:
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 8175, end_line: 8182, symbol: scx_bpf_dsq_insert, note: "no restrictions on @p from ops.dispatch; 'doesn't have any locking restrictions'"}
+        applies_to: [scx_bpf_task_set_slice, scx_bpf_task_set_dsq_vtime, scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, __scx_bpf_dsq_insert_vtime, scx_bpf_dsq_insert_vtime]
+        enforcement:
+          expected: none
+          mechanisms: [none]
+        references:
+          - {file: kernel/sched/ext.c, line: 8844, end_line: 8878, symbol: scx_bpf_task_set_slice}
+          - {file: kernel/sched/ext.c, line: 1338, end_line: 1350, symbol: update_curr_scx}
+        notes: "Kept as draft so that no consumer turns it into violations. The authority check (scx_task_on_sched) is an I2 ownership fact."
+
+      # ------------------------------------------------------------------
+      # Supporting entry state (calling contexts, locks held on callback entry)
+      # ------------------------------------------------------------------
+      - id: I1.dsq_insert.context
+        title: "Entry state: DSQ insertion kfuncs (enqueue_dispatch set) are callable only from ops.select_cpu, ops.enqueue and ops.dispatch"
+        description: >-
+          scx_kfunc_ids_enqueue_dispatch is granted by SCX_KF_ALLOW_ENQUEUE, which
+          scx_kf_allow_flags[] gives to select_cpu, enqueue and dispatch. Locks
+          held on entry: select_cpu -> p->pi_lock, no rq lock passed; enqueue ->
+          rq(task_rq(p)); dispatch -> rq(this_cpu). The kfunc asserts irqs are
+          disabled (lockdep). The guards on the writes it makes are in
+          I1.dsq_insert.commit_guards.
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            kfunc_sets: [scx_kfunc_ids_enqueue_dispatch]
+            callbacks: [ops.select_cpu, ops.enqueue, ops.dispatch]
+            program_types: [BPF_PROG_TYPE_STRUCT_OPS]
+          locks:
+            - {lock: irqs_disabled, state: held, where: access_site, note: "lockdep_assert_irqs_disabled() in scx_dsq_insert_preamble()"}
+            - {lock: pi_lock, state: held, where: callback_entry, callbacks: [ops.select_cpu], note: "try_to_wake_up() holds p->pi_lock; SCX_CALL_OP_TASK_RET(select_cpu, NULL)"}
+            - {lock: rq, state: held, where: callback_entry, callbacks: [ops.enqueue], note: "callback's rq = task_rq(p), do_enqueue_task()"}
+            - {lock: rq, state: held, where: callback_entry, callbacks: [ops.dispatch], note: "this CPU's rq, balance_one()/scx_dispatch_sched()"}
+            - {lock: bpf_spin_lock, state: not_held, where: access_site}
+        applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, __scx_bpf_dsq_insert_vtime, scx_bpf_dsq_insert_vtime]
+        enforcement:
+          expected: static
+          mechanisms: [kfunc_set, verifier, lockdep]
+          sites:
+            - {file: kernel/sched/ext.c, line: 8331, end_line: 8336, symbol: scx_kfunc_ids_enqueue_dispatch}
+            - {file: kernel/sched/ext.c, line: 9936, end_line: 9937, symbol: scx_init, note: "registered for BPF_PROG_TYPE_STRUCT_OPS only"}
+            - {file: kernel/sched/ext.c, line: 9912, symbol: scx_kfunc_context_filter, note: "in_enqueue && SCX_KF_ALLOW_ENQUEUE"}
+            - {file: kernel/sched/ext.c, line: 8102, symbol: scx_dsq_insert_preamble, note: "lockdep_assert_irqs_disabled()"}
+        references:
+          - {file: kernel/sched/ext.c, line: 9829, end_line: 9831, symbol: scx_kf_allow_flags, note: "select_cpu, enqueue, dispatch carry SCX_KF_ALLOW_ENQUEUE"}
+          - {file: kernel/sched/ext.c, line: 3334, end_line: 3339, symbol: select_task_rq_scx, note: "sets direct_dispatch_task=p, calls ops.select_cpu with locked_rq=NULL"}
+          - {file: kernel/sched/ext.c, line: 1948, symbol: do_enqueue_task, note: "SCX_CALL_OP_TASK(enqueue, rq)"}
+          - {file: kernel/sched/ext.c, line: 2840, end_line: 2844, symbol: scx_dispatch_sched, note: "SCX_CALL_OP(dispatch, rq)"}
+
+      - id: I1.dispatch_only.context
+        title: "Entry state: dispatch-only kfuncs (dispatch set minus dsq_move*) are callable only from ops.dispatch"
+        description: >-
+          scx_kfunc_ids_dispatch is granted by SCX_KF_ALLOW_DISPATCH, which only
+          ops.dispatch has. ops.dispatch runs from balance_one() ->
+          scx_dispatch_sched() with this CPU's rq lock held (also nested via
+          scx_bpf_sub_dispatch()). These kfuncs rely on the per-CPU dsp_ctx
+          (cursor, rq) set up for the current dispatch round but perform no
+          runtime context check; scx_bpf_dsq_move_to_local() may drop and retake
+          rq locks and must not run under a BPF spin lock.
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            kfunc_sets: [scx_kfunc_ids_dispatch]
+            callbacks: [ops.dispatch]
+            program_types: [BPF_PROG_TYPE_STRUCT_OPS]
+          locks:
+            - {lock: rq, state: held, where: callback_entry, note: "this CPU's rq; SCX_RQ_IN_BALANCE set"}
+            - {lock: bpf_spin_lock, state: not_held, where: access_site}
+        applies_to: [scx_bpf_dispatch_nr_slots, scx_bpf_dispatch_cancel, scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2, scx_bpf_sub_dispatch]
+        enforcement:
+          expected: static
+          mechanisms: [kfunc_set, verifier]
+          sites:
+            - {file: kernel/sched/ext.c, line: 8696, end_line: 8709, symbol: scx_kfunc_ids_dispatch, note: "scx_bpf_sub_dispatch only with CONFIG_EXT_SUB_SCHED"}
+            - {file: kernel/sched/ext.c, line: 9938, end_line: 9939, symbol: scx_init, note: "registered for BPF_PROG_TYPE_STRUCT_OPS only"}
+            - {file: kernel/sched/ext.c, line: 9910, symbol: scx_kfunc_context_filter}
+        references:
+          - {file: kernel/sched/ext.c, line: 9831, symbol: scx_kf_allow_flags, note: "only ops.dispatch has SCX_KF_ALLOW_DISPATCH"}
+          - {file: kernel/sched/ext.c, line: 2890, end_line: 2891, symbol: balance_one, note: "lockdep_assert_rq_held + sets SCX_RQ_IN_BALANCE before dispatch"}
+          - {file: kernel/sched/ext.c, line: 8689, symbol: scx_bpf_sub_dispatch, note: "re-enters scx_dispatch_sched() on this_rq"}
+          - {file: kernel/sched/ext.c, line: 8530, symbol: scx_bpf_dsq_move_to_local___v2, note: "uses dspc->rq; no runtime check that we are inside ops.dispatch"}
+
+      - id: I1.dsq_move.context
+        title: "Entry state: DSQ-iterator move kfuncs are callable from ops.dispatch (dispatch set) or from rq-unlocked contexts (unlocked set)"
+        description: >-
+          scx_bpf_dsq_move* are members of both the dispatch and the unlocked
+          sets: either set allowing the call suffices, and the two are separate
+          alternatives (dispatch set: ops.dispatch on STRUCT_OPS; unlocked set:
+          the UNLOCKED ops and SYSCALL programs). scx_dsq_move() distinguishes
+          the cases at runtime with this_rq->scx.flags & SCX_RQ_IN_BALANCE: in
+          balance it may unlock this_rq and lock task_rq(p); otherwise it locks
+          task_rq(p) itself, then dsq->lock.
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts_any_of:
+            - kfunc_sets: [scx_kfunc_ids_dispatch]
+              callbacks: [ops.dispatch]
+              program_types: [BPF_PROG_TYPE_STRUCT_OPS]
+            - kfunc_sets: [scx_kfunc_ids_unlocked]
+              callbacks: [ops.init_task, ops.dump, ops.cgroup_init, ops.cgroup_exit, ops.cgroup_prep_move, ops.cgroup_cancel_move, ops.cgroup_set_weight, ops.cgroup_set_bandwidth, ops.cgroup_set_idle, ops.sub_attach, ops.sub_detach, ops.cpu_online, ops.cpu_offline, ops.init, ops.exit]
+              program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL]
+          locks:
+            - {lock: rq, state: held, where: callback_entry, callbacks: [ops.dispatch], note: "iff SCX_RQ_IN_BALANCE"}
+            - {lock: rq, state: not_held, where: callback_entry, callbacks: [ops.init_task, ops.dump, ops.cgroup_init, ops.cgroup_exit, ops.cgroup_prep_move, ops.cgroup_cancel_move, ops.cgroup_set_weight, ops.cgroup_set_bandwidth, ops.cgroup_set_idle, ops.sub_attach, ops.sub_detach, ops.cpu_online, ops.cpu_offline, ops.init, ops.exit], note: "Precondition of the cited call sites: all pass locked_rq=NULL and none holds an rq lock there (not an absence fact for every ambient rq). init_task may sleep (sleepable member, ext.c:7616; 'This operation may block', ext_internal.h:570), so it cannot run under an rq spinlock; it is reached from scx_fork() after sched_cgroup_fork() dropped pi_lock (core.c:4783) and from scx_root_enable_workfn (6998), scx_sub_enable_workfn (7297) and scx_sub_disable (5820), each after scx_task_iter_unlock() dropped the iterator's rq lock (6996, 7291, 5807). dump (6365) is reached only via scx_dump_state() from the hard irq_work (6487) and SysRq-D (7820); the dumped CPU's rq is locked only later (6381) for dump_cpu/dump_task."}
+            - {lock: scx_cgroup_ops_rwsem, state: held, where: callback_entry, callbacks: [ops.cgroup_set_weight, ops.cgroup_set_idle, ops.cgroup_set_bandwidth], note: "read side: percpu_down_read() at 4440, 4456, 4473. NOT held for ops.cgroup_cancel_move: its call sites scx_cgroup_can_attach (error path, 4389) and scx_cgroup_cancel_attach (4430) take no scx_cgroup_ops_rwsem"}
+            - {lock: bpf_spin_lock, state: not_held, where: access_site}
+        applies_to: [scx_bpf_dsq_move_set_slice, scx_bpf_dsq_move_set_vtime, scx_bpf_dsq_move, scx_bpf_dsq_move_vtime]
+        enforcement:
+          expected: static
+          mechanisms: [kfunc_set, verifier]
+          sites:
+            - {file: kernel/sched/ext.c, line: 8701, end_line: 8705, symbol: scx_kfunc_ids_dispatch}
+            - {file: kernel/sched/ext.c, line: 8816, end_line: 8820, symbol: scx_kfunc_ids_unlocked}
+            - {file: kernel/sched/ext.c, line: 9944, end_line: 9945, symbol: scx_init, note: "unlocked set also registered for BPF_PROG_TYPE_SYSCALL"}
+            - {file: kernel/sched/ext.c, line: 9878, symbol: scx_kfunc_context_filter, note: "SYSCALL progs: unlocked/select_cpu/idle/any allowed"}
+        references:
+          - {file: kernel/sched/ext.c, line: 8389, end_line: 8398, symbol: scx_dsq_move, note: "in_balance decides lock dance"}
+          - {file: kernel/sched/ext.c, line: 8615, symbol: scx_bpf_dsq_move, note: "kernel-doc: ops.dispatch() or any BPF context which doesn't hold a rq lock"}
+          - {file: kernel/sched/ext.c, line: 3572, symbol: __scx_init_task, note: "SCX_CALL_OP_RET(init_task, NULL)"}
+          - {file: kernel/sched/ext.c, line: 7616, symbol: bpf_scx_check_member, note: "init_task may be sleepable"}
+          - {file: kernel/sched/ext_internal.h, line: 569, end_line: 570, note: "init_task: 'This operation may block'"}
+          - {file: kernel/sched/core.c, line: 4766, end_line: 4785, symbol: sched_cgroup_fork, note: "pi_lock released (4783) before scx_fork()"}
+          - {file: kernel/sched/ext.c, line: 843, end_line: 850, symbol: scx_task_iter_unlock, note: "drops the visited task's rq lock and scx_tasks_lock"}
+          - {file: kernel/sched/ext.c, line: 6365, symbol: scx_dump_state, note: "SCX_CALL_OP(dump, NULL) under scx_dump_lock only"}
+          - {file: kernel/sched/ext.c, line: 4389, symbol: scx_cgroup_can_attach, note: "cgroup_cancel_move on the error path, no scx_cgroup_ops_rwsem"}
+          - {file: kernel/sched/ext.c, line: 4430, symbol: scx_cgroup_cancel_attach, note: "cgroup_cancel_move, no scx_cgroup_ops_rwsem"}
+          - {file: kernel/sched/ext.c, line: 4440, symbol: scx_group_set_weight, note: "percpu_down_read(&scx_cgroup_ops_rwsem)"}
+
+      - id: I1.cpu_release.context
+        title: "Entry state: scx_bpf_reenqueue_local (legacy) is callable only from ops.cpu_release"
+        description: >-
+          The cpu_release set contains only the legacy scx_bpf_reenqueue_local();
+          SCX_KF_ALLOW_CPU_RELEASE is given only to ops.cpu_release, which is
+          called from switch_class() with the local rq lock held. The kfunc
+          asserts that the rq of smp_processor_id() is locked (lockdep only).
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            kfunc_sets: [scx_kfunc_ids_cpu_release]
+            callbacks: [ops.cpu_release]
+            program_types: [BPF_PROG_TYPE_STRUCT_OPS]
+          locks:
+            - {lock: rq, state: held, where: callback_entry, note: "this CPU's rq, switch_class()"}
+        applies_to: [scx_bpf_reenqueue_local]
+        enforcement:
+          expected: static
+          mechanisms: [kfunc_set, verifier, lockdep]
+          sites:
+            - {file: kernel/sched/ext.c, line: 8745, end_line: 8747, symbol: scx_kfunc_ids_cpu_release}
+            - {file: kernel/sched/ext.c, line: 9908, symbol: scx_kfunc_context_filter}
+            - {file: kernel/sched/ext.c, line: 8738, symbol: scx_bpf_reenqueue_local, note: "lockdep_assert_rq_held(this cpu rq)"}
+        references:
+          - {file: kernel/sched/ext.c, line: 9832, symbol: scx_kf_allow_flags, note: "only ops.cpu_release has SCX_KF_ALLOW_CPU_RELEASE"}
+          - {file: kernel/sched/ext.c, line: 3054, symbol: switch_class, note: "SCX_CALL_OP(cpu_release, rq)"}
+
+      - id: I1.create_dsq.sleepable
+        title: "Entry state: scx_bpf_create_dsq is callable only from sleepable UNLOCKED ops or SYSCALL programs"
+        description: >-
+          Member of the unlocked set with KF_SLEEPABLE. The filter restricts it to
+          SCX_KF_ALLOW_UNLOCKED ops and SYSCALL progs; the verifier additionally
+          requires a sleepable program, and bpf_scx_check_member() only allows
+          sleepable programs on init_task, cgroup_init, cgroup_exit,
+          cgroup_prep_move, cpu_online, cpu_offline, init, exit, sub_attach,
+          sub_detach. Allocates with GFP_KERNEL.
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            kfunc_sets: [scx_kfunc_ids_unlocked]
+            callbacks: [ops.init_task, ops.cgroup_init, ops.cgroup_exit, ops.cgroup_prep_move, ops.cpu_online, ops.cpu_offline, ops.init, ops.exit, ops.sub_attach, ops.sub_detach]
+            program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL]
+          locks:
+            - {lock: rq, state: not_held, where: callback_entry, note: "precondition of the cited call sites (see I1.dsq_move.context)"}
+          predicates:
+            - expr: "prog->sleepable"
+              checked_by: [check_kfunc_call, bpf_scx_check_member]
+              on_failure: error
+              note: "verifier rejects the program (load fails), not a runtime scx_error"
+        applies_to: [scx_bpf_create_dsq]
+        enforcement:
+          expected: static
+          mechanisms: [kfunc_set, verifier]
+          sites:
+            - {file: kernel/sched/ext.c, line: 8815, symbol: scx_kfunc_ids_unlocked, note: "KF_IMPLICIT_ARGS | KF_SLEEPABLE"}
+            - {file: kernel/sched/ext.c, line: 9906, symbol: scx_kfunc_context_filter, note: "SCX_KF_ALLOW_UNLOCKED && in_unlocked"}
+            - {file: kernel/sched/ext.c, line: 7609, end_line: 7631, symbol: bpf_scx_check_member, note: "sleepable only for listed ops"}
+            - {file: kernel/bpf/verifier.c, line: 13053, end_line: 13055, note: "'program must be sleepable to call sleepable kfunc'"}
+        references:
+          - {file: kernel/sched/ext.c, line: 8779, symbol: scx_bpf_create_dsq, note: "kmalloc_node(GFP_KERNEL)"}
+
+      - id: I1.select_cpu.context
+        title: "Entry state: select_cpu kfuncs are callable from ops.select_cpu/ops.enqueue (select_cpu set) or rq-unlocked contexts (unlocked set)"
+        description: >-
+          Members of scx_kfunc_ids_select_cpu (ext_idle.c) and of the unlocked set;
+          either set allowing the call suffices. Kept out of TRACING because they
+          may take p->pi_lock. At runtime select_cpu_from_kfunc() requires the lock
+          protecting p->cpus_ptr: inside ops.select_cpu p must be kf_tasks[0]
+          (pi_lock held by try_to_wake_up); inside another rq-locked op task_rq(p)
+          must equal scx_locked_rq() (else scx_error "cross-task"); otherwise it
+          takes p->pi_lock itself. The only rq-locked select_task_rq() caller,
+          proxy_force_return() (core.c:6797), needs SCHED_PROXY_EXEC, which
+          depends on !SCHED_CLASS_EXT (init/Kconfig:938).
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts_any_of:
+            - kfunc_sets: [scx_kfunc_ids_select_cpu]
+              callbacks: [ops.select_cpu, ops.enqueue]
+              program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL]
+            - kfunc_sets: [scx_kfunc_ids_unlocked]
+              callbacks: [ops.init_task, ops.dump, ops.cgroup_init, ops.cgroup_exit, ops.cgroup_prep_move, ops.cgroup_cancel_move, ops.cgroup_set_weight, ops.cgroup_set_bandwidth, ops.cgroup_set_idle, ops.sub_attach, ops.sub_detach, ops.cpu_online, ops.cpu_offline, ops.init, ops.exit]
+              program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL]
+          locks:
+            - {lock: pi_lock, state: held, where: callback_entry, callbacks: [ops.select_cpu]}
+            - {lock: rq, state: held, where: callback_entry, callbacks: [ops.enqueue], note: "callback's rq = task_rq(p)"}
+          predicates:
+            - expr: "!this_rq()->scx.in_select_cpu || p == current->scx.kf_tasks[0] || p == current->scx.kf_tasks[1]"
+              checked_by: [select_cpu_from_kfunc, scx_kf_arg_task_ok]
+              on_failure: error
+            - expr: "!scx_locked_rq() || task_rq(p) == scx_locked_rq()"
+              checked_by: [select_cpu_from_kfunc]
+              on_failure: error
+        applies_to: [__scx_bpf_select_cpu_and, scx_bpf_select_cpu_and, scx_bpf_select_cpu_dfl]
+        enforcement:
+          expected: static+runtime
+          mechanisms: [kfunc_set, verifier, scx_error, lock, lockdep]
+          sites:
+            - {file: kernel/sched/ext_idle.c, line: 1499, end_line: 1503, symbol: scx_kfunc_ids_select_cpu}
+            - {file: kernel/sched/ext.c, line: 8821, end_line: 8824, symbol: scx_kfunc_ids_unlocked}
+            - {file: kernel/sched/ext_idle.c, line: 1518, end_line: 1519, symbol: scx_idle_init, note: "registered for STRUCT_OPS and SYSCALL only"}
+            - {file: kernel/sched/ext.c, line: 9914, symbol: scx_kfunc_context_filter}
+            - {file: kernel/sched/ext_idle.c, line: 940, end_line: 943, symbol: select_cpu_from_kfunc, note: "scx_kf_arg_task_ok() + lockdep_assert_held(pi_lock)"}
+            - {file: kernel/sched/ext_idle.c, line: 944, end_line: 946, symbol: select_cpu_from_kfunc, note: "cross_task scx_error at 974-977"}
+            - {file: kernel/sched/ext_idle.c, line: 948, symbol: select_cpu_from_kfunc, note: "unlocked: raw_spin_lock_irqsave(&p->pi_lock)"}
+            - {file: kernel/sched/ext.c, line: 549, end_line: 559, symbol: scx_kf_arg_task_ok}
+        references:
+          - {file: kernel/sched/ext_idle.c, line: 1487, end_line: 1497, note: "comment: keep select_cpu kfuncs out of TRACING"}
+          - {file: kernel/sched/ext.c, line: 9829, end_line: 9830, symbol: scx_kf_allow_flags, note: "select_cpu and enqueue carry SCX_KF_ALLOW_SELECT_CPU"}
+          - {file: kernel/sched/ext.c, line: 3338, end_line: 3340, symbol: select_task_rq_scx, note: "in_select_cpu=true around ops.select_cpu"}
+        notes: "Stale comment at ext_idle.c:934 lists non-SCX struct_ops as an unlocked caller; the filter rejects them (ext.c:9896)."
+
+      - id: I1.idle.context
+        title: "Entry state: idle-tracking kfuncs are callable from any SCX op, SYSCALL and TRACING programs"
+        description: >-
+          scx_kfunc_ids_idle is registered for STRUCT_OPS, TRACING and SYSCALL; the
+          filter allows it from every sched_ext op (in_idle short-circuit) and any
+          non-struct_ops prog type it is registered for. No lock is required. The
+          cpumask getters / put use KF_ACQUIRE / KF_RELEASE only so that the
+          verifier tracks the returned cpumask as a referenced, trusted pointer;
+          no reference to the global idle cpumask is actually acquired or released
+          (ext_idle.c:1241-1248). Rejected only in non-SCX struct_ops.
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            kfunc_sets: [scx_kfunc_ids_idle]
+            program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL, BPF_PROG_TYPE_TRACING]
+        applies_to: [scx_bpf_cpu_node, scx_bpf_get_idle_cpumask_node, scx_bpf_get_idle_cpumask, scx_bpf_get_idle_smtmask_node, scx_bpf_get_idle_smtmask, scx_bpf_put_idle_cpumask, scx_bpf_test_and_clear_cpu_idle, scx_bpf_pick_idle_cpu_node, scx_bpf_pick_idle_cpu, scx_bpf_pick_any_cpu_node, scx_bpf_pick_any_cpu]
+        enforcement:
+          expected: static
+          mechanisms: [kfunc_set, verifier]
+          sites:
+            - {file: kernel/sched/ext_idle.c, line: 1468, end_line: 1480, symbol: scx_kfunc_ids_idle}
+            - {file: kernel/sched/ext_idle.c, line: 1515, end_line: 1517, symbol: scx_idle_init, note: "registered for STRUCT_OPS, TRACING, SYSCALL"}
+            - {file: kernel/sched/ext.c, line: 9900, symbol: scx_kfunc_context_filter, note: "in_any || in_idle -> allowed for every SCX op"}
+        references:
+          - {file: kernel/sched/ext.c, line: 9881, symbol: scx_kfunc_context_filter, note: "non-struct_ops progs: only any/idle"}
+          - {file: kernel/sched/ext_idle.c, line: 1241, end_line: 1248, symbol: scx_bpf_put_idle_cpumask, note: "acquire/release only make the pointer trusted; nothing is refcounted"}
+
+      - id: I1.any.context
+        title: "Entry state: generic `any`-set kfuncs are callable from any SCX op, SYSCALL and TRACING programs without a caller-held lock"
+        description: >-
+          scx_kfunc_ids_any is registered for STRUCT_OPS, TRACING and SYSCALL and
+          bypasses the per-op allow table. These kfuncs take their own locks
+          (dsq->lock, rq lock or trylock, deferred_reenq_lock), are lockless / RCU
+          (dsq_peek, cpu_curr) or defer work (kick_cpu via irq_work, dsq_reenq).
+          No caller-held lock is required and none is checked. The writes made by
+          scx_bpf_cpuperf_set and scx_bpf_task_set_slice / _dsq_vtime are covered
+          by I1.rq_scx.rq_lock and I1.task_slice_vtime.unlocked_writers.
+          scx_bpf_cpu_rq is deprecated because it hands out an rq pointer without
+          the rq lock.
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            kfunc_sets: [scx_kfunc_ids_any]
+            program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL, BPF_PROG_TYPE_TRACING]
+        applies_to: [scx_bpf_kick_cpu, scx_bpf_dsq_nr_queued, scx_bpf_destroy_dsq, scx_bpf_dsq_peek, scx_bpf_dsq_reenq, scx_bpf_reenqueue_local___v2, bpf_iter_scx_dsq_new, bpf_iter_scx_dsq_next, bpf_iter_scx_dsq_destroy, scx_bpf_exit_bstr, scx_bpf_error_bstr, scx_bpf_cpuperf_cap, scx_bpf_cpuperf_cur, scx_bpf_cpuperf_set, scx_bpf_nr_node_ids, scx_bpf_nr_cpu_ids, scx_bpf_get_possible_cpumask, scx_bpf_get_online_cpumask, scx_bpf_put_cpumask, scx_bpf_task_running, scx_bpf_task_cpu, scx_bpf_cpu_rq, scx_bpf_cpu_curr, scx_bpf_now, scx_bpf_events, scx_bpf_task_set_slice, scx_bpf_task_set_dsq_vtime]
+        enforcement:
+          expected: static
+          mechanisms: [kfunc_set, verifier]
+          sites:
+            - {file: kernel/sched/ext.c, line: 9767, end_line: 9800, symbol: scx_kfunc_ids_any}
+            - {file: kernel/sched/ext.c, line: 9946, end_line: 9951, symbol: scx_init, note: "registered for STRUCT_OPS, TRACING, SYSCALL"}
+            - {file: kernel/sched/ext.c, line: 9881, symbol: scx_kfunc_context_filter, note: "non-struct_ops progs: only any/idle"}
+        references:
+          - {file: kernel/sched/ext.c, line: 8902, end_line: 8904, symbol: scx_kick_cpu, note: "actual kick bounced to irq_work to avoid nesting rq locks"}
+          - {file: kernel/sched/ext.c, line: 9156, symbol: scx_bpf_dsq_reenq, note: "'Can be called from anywhere' (asynchronous)"}
+          - {file: kernel/sched/ext.c, line: 9552, end_line: 9557, symbol: scx_bpf_cpu_rq, note: "deprecated: unlocked rq pointer"}
+
+      - id: I1.locked_rq.getter
+        title: "Entry state: scx_bpf_locked_rq requires an rq tracked as locked by the current SCX op"
+        description: >-
+          scx_bpf_locked_rq() returns scx_locked_rq() (per-CPU
+          scx_locked_rq_state, maintained by SCX_CALL_OP* from the locked_rq
+          argument) and scx_error()s if it is NULL. It takes no cpu argument and
+          writes no shared state; the setter scx_bpf_cpuperf_set has its own
+          protection rule (I1.rq_scx.rq_lock).
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            kfunc_sets: [scx_kfunc_ids_any]
+            program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL, BPF_PROG_TYPE_TRACING]
+          predicates:
+            - expr: "scx_locked_rq() != NULL"
+              evaluated_at: {function: scx_bpf_locked_rq, file: kernel/sched/ext.c, line: 9581}
+              checked_by: [scx_bpf_locked_rq]
+              on_failure: return
+              note: "scx_error 9582, return NULL 9583"
+        applies_to: [scx_bpf_locked_rq]
+        enforcement:
+          expected: runtime
+          mechanisms: [scx_error, guard]
+          sites:
+            - {file: kernel/sched/ext.c, line: 9581, end_line: 9584, symbol: scx_bpf_locked_rq, note: "scx_error 'accessing rq without holding rq lock'"}
+        references:
+          - {file: kernel/sched/ext.c, line: 456, symbol: scx_locked_rq_state}
+          - {file: kernel/sched/ext.c, line: 465, end_line: 466, symbol: update_locked_rq, note: "lockdep_assert_rq_held"}
+          - {file: kernel/sched/ext.c, line: 474, end_line: 485, symbol: SCX_CALL_OP, note: "saves/restores locked rq around the op; a NULL argument neither releases an rq nor clears the tracked one"}
+
+      - id: I1.dump.context
+        title: "Entry state: scx_bpf_dump_bstr is callable only during ops.dump/dump_cpu/dump_task"
+        description: >-
+          Statically in the `any` set; the restriction is a runtime check that the
+          calling CPU is the one currently running scx_dump_state()
+          (scx_dump_data.cpu). The dump ops run with scx_dump_lock (raw spinlock,
+          irqs off) held, from irq_work or SysRq; dump_cpu/dump_task additionally
+          hold the dumped CPU's rq lock.
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            kfunc_sets: [scx_kfunc_ids_any]
+            callbacks: [ops.dump, ops.dump_cpu, ops.dump_task]
+          locks:
+            - {lock: scx_dump_lock, state: held, where: callback_entry}
+            - {lock: rq, state: held, where: callback_entry, callbacks: [ops.dump_cpu, ops.dump_task], note: "rq of the dumped CPU"}
+          predicates:
+            - expr: "raw_smp_processor_id() == dd->cpu"
+              checked_by: [scx_bpf_dump_bstr]
+              on_failure: error
+        applies_to: [scx_bpf_dump_bstr]
+        enforcement:
+          expected: runtime
+          mechanisms: [scx_error]
+          sites:
+            - {file: kernel/sched/ext.c, line: 9324, end_line: 9327, symbol: scx_bpf_dump_bstr, note: "scx_error 'must only be called from ops.dump() and friends'"}
+        references:
+          - {file: kernel/sched/ext.c, line: 6337, symbol: scx_dump_state, note: "guard(raw_spinlock_irqsave)(&scx_dump_lock)"}
+          - {file: kernel/sched/ext.c, line: 6381, symbol: scx_dump_state, note: "rq_lock_irqsave before ops.dump_cpu/dump_task"}
+        notes: "Weak check: only the CPU number is compared; a TRACING program on the dumping CPU (e.g. NMI) passes."
+
+      - id: I1.task_cgroup.subject_task
+        title: "Entry state: scx_bpf_task_cgroup may only be called on a task the current op operates on"
+        description: >-
+          @p must be current->scx.kf_tasks[0] or [1], i.e. the task argument of an
+          op invoked via SCX_CALL_OP_TASK*() (which holds p's rq lock or, for
+          select_cpu, p's pi_lock), so that p->sched_task_group is stable.
+          Otherwise scx_error() and the root cgroup is returned.
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            kfunc_sets: [scx_kfunc_ids_any]
+            callbacks: [ops.select_cpu, ops.enqueue, ops.dequeue, ops.runnable, ops.running, ops.stopping, ops.quiescent, ops.yield, ops.core_sched_before, ops.set_weight, ops.set_cpumask, ops.tick, ops.enable, ops.disable, ops.exit_task, ops.cgroup_move]
+          locks:
+            - {lock: pi_lock, state: held, where: callback_entry, callbacks: [ops.select_cpu]}
+            - {lock: rq, state: held, where: callback_entry, callbacks: [ops.enqueue, ops.dequeue, ops.runnable, ops.running, ops.stopping, ops.quiescent, ops.yield, ops.core_sched_before, ops.set_weight, ops.set_cpumask, ops.tick, ops.enable, ops.disable, ops.exit_task, ops.cgroup_move]}
+          predicates:
+            - expr: "p == current->scx.kf_tasks[0] || p == current->scx.kf_tasks[1]"
+              checked_by: [scx_kf_arg_task_ok]
+              on_failure: error
+        applies_to: [scx_bpf_task_cgroup]
+        enforcement:
+          expected: runtime
+          mechanisms: [scx_error]
+          sites:
+            - {file: kernel/sched/ext.c, line: 9754, symbol: scx_bpf_task_cgroup, note: "scx_kf_arg_task_ok()"}
+        references:
+          - {file: kernel/sched/ext.c, line: 9798, symbol: scx_kfunc_ids_any, note: "CONFIG_CGROUP_SCHED only"}
+          - {file: kernel/sched/ext.c, line: 503, end_line: 546, symbol: SCX_CALL_OP_TASK, note: "kf_tasks[] protocol and lock guarantee"}
+
+      - id: I1.bpf_spin_lock.no_calls
+        title: "Entry state: no sched_ext kfunc may be called while the BPF program holds a bpf_spin_lock"
+        description: >-
+          The verifier rejects any call except spin_unlock/kptr_xchg and
+          kfunc_spin_allowed() kfuncs while env->cur_state->active_locks is set.
+          None of the SCX kfuncs is spin-allowed. This is what sched-ext.rst means
+          by "cannot be called with any BPF locks held".
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          locks:
+            - {lock: bpf_spin_lock, state: not_held, where: access_site}
+        applies_to: ["*"]
+        enforcement:
+          expected: static
+          mechanisms: [verifier]
+          sites:
+            - {file: kernel/bpf/verifier.c, line: 17626, end_line: 17634, note: "'function calls are not allowed while holding a lock'"}
+        references:
+          - {file: Documentation/scheduler/sched-ext.rst, line: 373, note: "dsq_insert/move_to_local and BPF locks"}
+          - {file: kernel/sched/ext.c, line: 8181, symbol: scx_bpf_dsq_insert, note: "kernel-doc says no locking restrictions (docs drift)"}
+
+      - id: I1.prog_type.gate
+        title: "Entry state: SCX kfuncs are denied to non-SCX struct_ops; TRACING gets only any+idle; SYSCALL gets unlocked+select_cpu+idle+any"
+        description: >-
+          Applies to every SCX kfunc. Enforced by which hooks each set is
+          registered for and by scx_kfunc_context_filter(), invoked from
+          btf_kfunc_is_allowed() during verification. While st_ops is not yet
+          known (early kfunc collection) everything is allowed and the filter is
+          re-run in do_check_main().
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            program_types: [BPF_PROG_TYPE_STRUCT_OPS, BPF_PROG_TYPE_SYSCALL, BPF_PROG_TYPE_TRACING]
+        applies_to: ["*"]
+        enforcement:
+          expected: static
+          mechanisms: [kfunc_set, verifier]
+          sites:
+            - {file: kernel/sched/ext.c, line: 9860, end_line: 9917, symbol: scx_kfunc_context_filter}
+            - {file: kernel/sched/ext.c, line: 9936, end_line: 9951, symbol: scx_init, note: "set registration per program type"}
+            - {file: kernel/sched/ext_idle.c, line: 1515, end_line: 1519, symbol: scx_idle_init}
+            - {file: kernel/bpf/btf.c, line: 8864, end_line: 8867, symbol: __btf_kfunc_is_allowed, note: "any filter returning non-zero denies"}
+            - {file: kernel/bpf/verifier.c, line: 12612, note: "btf_kfunc_is_allowed() check at kfunc lookup"}
+        references:
+          - {file: kernel/sched/ext.c, line: 9877, end_line: 9878, symbol: scx_kfunc_context_filter, note: "SYSCALL rule"}
+          - {file: kernel/sched/ext.c, line: 9880, end_line: 9881, symbol: scx_kfunc_context_filter, note: "TRACING (non-struct_ops) rule"}
+          - {file: kernel/sched/ext.c, line: 9890, end_line: 9891, symbol: scx_kfunc_context_filter, note: "st_ops not set yet -> allow, re-checked later"}
+          - {file: kernel/sched/ext.c, line: 9896, end_line: 9897, symbol: scx_kfunc_context_filter, note: "non-SCX struct_ops -> -EACCES"}
