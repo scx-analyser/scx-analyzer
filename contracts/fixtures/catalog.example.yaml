@@ -1,50 +1,190 @@
-# Example catalog entries - DRAFT, to be replaced by Epic A (tasks A3-A5).
-# Field names and enforcement points must be verified against the pinned kernel.
+# Example invariant catalog: one entry per family (I1, I2, I3) with example rules
+# under `rules` (I1: one protection rule with a bound obligation and call path,
+# one supporting entry-state rule), written against
+# Linux v7.1 (commit below). All file:line references were checked against
+# kernel/sched/ext.c at that commit. Real entries live in catalog/invariants/*.yaml
+# (tasks A3-A5); this file documents the contract by example.
+#
+# kernel_version: the facts below are from v7.1 (= KERNEL_VERSION, kernel_commit), but
+# this illustrative fixture must carry the call-graph fixture's kernel_version, because
+# the checker tests run it against that fixture and the runner rejects a mismatch
+# (tools/validate_contracts.py enforces the pairing). Real catalog files
+# (catalog/invariants/*.yaml) carry "v7.1". When Epic B moves
+# contracts/fixtures/callgraph.example.json to "v7.1", change this value (and the
+# findings fixture) in the same PR.
 kernel_version: "TBD (see KERNEL_VERSION)"
+kernel_commit: 8cd9520d35a6c38db6567e97dd93b1f11f185dc6
+illustrative: true
 invariants:
   - id: I1
-    title: "kfuncs are only callable from the ops callbacks/contexts their kfunc set allows"
+    title: "Protected scheduler-state writes made by sched_ext kfuncs hold the lock that protects them"
+    description: >-
+      Locking requirements for shared sched_ext state written along kfunc call
+      paths; one protection rule and one supporting entry-state rule taken from
+      catalog/invariants/I1.yaml.
     category: context_locking
-    objects:
-      - {struct: task_struct, fields: [scx.kf_mask]}
-    access: read
-    requires:
-      contexts: ["ops.dispatch (SCX_KF_DISPATCH)"]
-      locks: [rq]
-    applies_to: [scx_bpf_dsq_move_to_local, scx_bpf_dispatch_nr_slots, scx_bpf_dispatch_cancel]
-    enforcement_expected: static+runtime
-    references:
-      - {file: kernel/sched/ext.c, note: "kfunc set registration + scx_kf_allowed()"}
+    rules:
+      - id: I1.local_dsq.rq_lock
+        title: "A local DSQ and the task's link into it are written with the owning rq lock held"
+        description: >-
+          Local DSQs are protected by their rq's lock (ext.c:2574-2576).
+          move_local_task_to_local_dsq() appends the task to dst_rq's local DSQ and
+          bumps its nr; it asserts both the source DSQ lock and dst_rq's lock.
+        category: context_locking
+        status: source_verified
+        role: protection
+        objects:
+          - {struct: scx_dispatch_q, fields: [list, nr]}
+          - {struct: task_struct, fields: [scx.dsq_list.node, scx.dsq]}
+        access: write
+        requires:
+          locks:
+            - {lock: bpf_spin_lock, state: not_held, where: access_site, note: "kfunc-wide context condition, not field protection"}
+        obligations:
+          - id: dst_local_dsq
+            access: {struct: scx_dispatch_q, fields: [list, nr], op: write, instance: dst_dsq}
+            sites:
+              - {function: move_local_task_to_local_dsq, file: kernel/sched/ext.c, line: 2261, end_line: 2266}
+            requires:
+              locks:
+                - {lock: rq, instance: dst_rq, state: held}
+            basis: checked
+            evidence:
+              - {kind: lockdep_assert, file: kernel/sched/ext.c, line: 2257, symbol: move_local_task_to_local_dsq}
+              - {kind: kernel_comment, file: kernel/sched/ext.c, line: 2574, end_line: 2576, symbol: dispatch_to_local_dsq, note: "local DSQs are protected with rq locks"}
+            paths:
+              - root: scx_bpf_dsq_move_to_local___v2
+                entry:
+                  - {function: balance_one, file: kernel/sched/ext.c, line: 2890, note: "lockdep_assert_rq_held(rq)"}
+                  - {function: scx_dispatch_sched, file: kernel/sched/ext.c, line: 2844, note: "SCX_CALL_OP(sch, dispatch, rq, ...)"}
+                steps:
+                  - {function: scx_bpf_dsq_move_to_local___v2, file: kernel/sched/ext.c, line: 8538, call: "consume_dispatch_q(sch, dspc->rq, dsq, enq_flags)", held: [{lock: rq, instance: dspc->rq}]}
+                  - {function: consume_dispatch_q, file: kernel/sched/ext.c, line: 2543, call: "move_local_task_to_local_dsq(sch, p, enq_flags, dsq, rq)", held: [{lock: rq, instance: rq}, {lock: dsq, instance: dsq}]}
+                  - {function: move_local_task_to_local_dsq, file: kernel/sched/ext.c, line: 2266, held: [{lock: rq, instance: dst_rq}, {lock: dsq, instance: src_dsq}]}
+        applies_to: [scx_bpf_dsq_move_to_local, scx_bpf_dsq_move_to_local___v2]
+        enforcement:
+          expected: runtime
+          mechanisms: [lock, lockdep]
+          sites:
+            - {file: kernel/sched/ext.c, line: 2525, symbol: consume_dispatch_q, note: "raw_spin_lock(&dsq->lock); rq already held by balance_one()"}
+            - {file: kernel/sched/ext.c, line: 2256, end_line: 2257, symbol: move_local_task_to_local_dsq, note: "lockdep (CONFIG_LOCKDEP only)"}
+        references:
+          - {file: kernel/sched/ext.c, line: 2248, end_line: 2270, symbol: move_local_task_to_local_dsq}
+
+      - id: I1.dsq_insert.context
+        title: "Entry state: DSQ-insert kfuncs are callable only from ops.select_cpu, ops.enqueue and ops.dispatch"
+        description: >-
+          Supporting entry-state facts, not a field-protection rule.
+          scx_bpf_dsq_insert() and its variants are members of the
+          scx_kfunc_ids_enqueue_dispatch BTF set, registered for STRUCT_OPS programs
+          only; the set's .filter, scx_kfunc_context_filter(), admits only
+          select_cpu, enqueue and dispatch. ops.enqueue and ops.dispatch are entered
+          with the rq lock held.
+        category: context_locking
+        status: source_verified
+        role: entry_state
+        objects: []
+        access: none
+        requires:
+          contexts:
+            kfunc_sets: [scx_kfunc_ids_enqueue_dispatch]
+            callbacks: [ops.select_cpu, ops.enqueue, ops.dispatch]
+            program_types: [BPF_PROG_TYPE_STRUCT_OPS]
+          locks:
+            - lock: rq
+              state: held
+              where: callback_entry
+              callbacks: [ops.enqueue, ops.dispatch]
+              note: "SCX_CALL_OP*(..., rq, ...) -> update_locked_rq() asserts the rq lock"
+        applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, __scx_bpf_dsq_insert_vtime, scx_bpf_dsq_insert_vtime]
+        enforcement:
+          expected: static
+          mechanisms: [kfunc_set, verifier]
+          sites:
+            - {file: kernel/sched/ext.c, line: 8331, end_line: 8336, symbol: scx_kfunc_ids_enqueue_dispatch, note: "BTF set membership"}
+            - {file: kernel/sched/ext.c, line: 9936, end_line: 9937, symbol: scx_init, note: "registered for BPF_PROG_TYPE_STRUCT_OPS only"}
+            - {file: kernel/sched/ext.c, line: 9860, end_line: 9917, symbol: scx_kfunc_context_filter, note: "verifier-time per-op filter, -EACCES otherwise"}
+        references:
+          - {file: kernel/sched/ext.c, line: 9828, end_line: 9850, symbol: scx_kf_allow_flags, note: "select_cpu/enqueue/dispatch grant SCX_KF_ALLOW_ENQUEUE"}
+          - {file: kernel/sched/ext.c, line: 458, end_line: 468, symbol: update_locked_rq}
+        notes: "v7.1 has no runtime kf_mask / scx_kf_allowed(); context checking is verifier-time only."
 
   - id: I2
-    title: "A task's DSQ membership and ops_state change only under the owning lock / via atomics"
+    title: "Task ownership, DSQ membership and ops_state change only under the owning lock or via atomics"
+    description: >-
+      Ownership / DSQ / ops_state protocol of sched_ext tasks; one example
+      rule (the ops_state transition protocol).
     category: ownership_state
-    objects:
-      - {struct: task_struct, fields: [scx.dsq, scx.dsq_list, scx.ops_state]}
-      - {struct: scx_dispatch_q, fields: [list, nr]}
-    access: write
-    requires:
-      locks: [dsq]
-      transitions:
-        - [SCX_OPSS_NONE, SCX_OPSS_QUEUEING]
-        - [SCX_OPSS_QUEUEING, SCX_OPSS_QUEUED]
-        - [SCX_OPSS_QUEUED, SCX_OPSS_DISPATCHING]
-        - [SCX_OPSS_DISPATCHING, SCX_OPSS_NONE]
-    applies_to: ["*"]
-    enforcement_expected: runtime
-    references:
-      - {file: kernel/sched/ext.c, note: "dispatch_enqueue(), finish_dispatch()"}
+    rules:
+      - id: I2.ops_state.transitions
+        title: "p->scx.ops_state only follows the NONE -> QUEUEING -> QUEUED -> DISPATCHING -> NONE protocol"
+        description: >-
+          ops_state records who owns a task (SCX core vs BPF scheduler). QUEUEING is
+          entered and left under the task's rq lock in do_enqueue_task(); claims by
+          dispatch (QUEUED -> DISPATCHING) and dequeue (QUEUED -> NONE) race and must
+          use cmpxchg; exits from QUEUEING/DISPATCHING must be store-release so that
+          waiters in wait_ops_state() observe them. The QSEQ bits embedded in the
+          value detect stale dispatches after a dequeue/re-enqueue.
+        category: ownership_state
+        status: source_verified
+        objects:
+          - {struct: task_struct, fields: [scx.ops_state]}
+        access: rw
+        requires:
+          transitions:
+            - {from: SCX_OPSS_NONE, to: SCX_OPSS_QUEUEING, op: set, lock: task_rq, sites: [do_enqueue_task]}
+            - {from: SCX_OPSS_QUEUEING, to: SCX_OPSS_QUEUED, op: set_release, lock: task_rq, sites: [do_enqueue_task]}
+            - {from: SCX_OPSS_QUEUEING, to: SCX_OPSS_NONE, op: set_release, lock: task_rq, sites: [direct_dispatch]}
+            - {from: SCX_OPSS_QUEUED, to: SCX_OPSS_DISPATCHING, op: cmpxchg, sites: [finish_dispatch]}
+            - {from: SCX_OPSS_QUEUED, to: SCX_OPSS_NONE, op: cmpxchg, lock: task_rq, sites: [ops_dequeue]}
+            - {from: SCX_OPSS_DISPATCHING, to: SCX_OPSS_NONE, op: set_release, sites: [dispatch_enqueue, dispatch_to_local_dsq]}
+        applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, __scx_bpf_dsq_insert_vtime, scx_bpf_dsq_insert_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [atomic, lock, warn]
+          sites:
+            - {file: kernel/sched/ext.c, line: 1941, end_line: 1942, symbol: do_enqueue_task, note: "WARN unless NONE, then set QUEUEING"}
+            - {file: kernel/sched/ext.c, line: 1964, symbol: do_enqueue_task, note: "set_release QUEUED"}
+            - {file: kernel/sched/ext.c, line: 2724, end_line: 2725, symbol: finish_dispatch, note: "cmpxchg QUEUED -> DISPATCHING"}
+            - {file: kernel/sched/ext.c, line: 2109, end_line: 2110, symbol: ops_dequeue, note: "cmpxchg QUEUED -> NONE"}
+        references:
+          - {file: kernel/sched/ext_internal.h, line: 1268, end_line: 1310, note: "ops_state protocol and memory ordering"}
+          - {file: kernel/sched/ext.c, line: 1849, end_line: 1854, symbol: direct_dispatch}
+          - {file: kernel/sched/ext.c, line: 1643, symbol: dispatch_enqueue, note: "SCX_ENQ_CLEAR_OPSS"}
+          - {file: kernel/sched/ext.c, line: 2622, symbol: dispatch_to_local_dsq}
+        notes: "kfuncs called from ops.dispatch only buffer the insert (scx_dsq_insert_commit); the ops_state transition happens later in finish_dispatch()."
 
   - id: I3
-    title: "Local-DSQ dispatch targets a valid CPU the task is allowed to run on"
+    title: "CPU, affinity and other kfunc arguments are validated before use"
+    description: >-
+      Argument validity of sched_ext kfuncs; one example rule (local-DSQ
+      dispatch to a valid CPU).
     category: argument_validity
-    objects:
-      - {struct: task_struct, fields: [cpus_ptr]}
-      - {struct: rq, fields: [scx.local_dsq]}
-    access: write
-    requires:
-      predicates: ["ops_cpu_valid(cpu)", "cpumask_test_cpu(cpu, p->cpus_ptr)"]
-    applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert_vtime, scx_bpf_dsq_move]
-    enforcement_expected: runtime
-    references:
-      - {file: kernel/sched/ext.c, note: "SCX_DSQ_LOCAL_ON handling, task_can_run_on_remote_rq()"}
+    rules:
+      - id: I3.local_on.cpu_valid
+        title: "SCX_DSQ_LOCAL_ON | cpu targets a valid, possible CPU"
+        description: >-
+          When a task is dispatched to SCX_DSQ_LOCAL_ON | cpu, the embedded CPU must
+          be in range and possible before the kernel dereferences cpu_rq(cpu).
+          find_dsq_for_dispatch() checks it with ops_cpu_valid(); an invalid CPU
+          triggers scx_error() and falls back to the global DSQ.
+        category: argument_validity
+        status: source_verified
+        objects:
+          - {struct: rq, fields: [scx.local_dsq]}
+        access: write
+        requires:
+          predicates:
+            - expr: "ops_cpu_valid(sch, dsq_id & SCX_DSQ_LOCAL_CPU_MASK, where)"
+              checked_by: [ops_cpu_valid, find_dsq_for_dispatch]
+              on_failure: fallback
+              note: "fallback = find_global_dsq()"
+        applies_to: [scx_bpf_dsq_insert, scx_bpf_dsq_insert___v2, __scx_bpf_dsq_insert_vtime, scx_bpf_dsq_insert_vtime]
+        enforcement:
+          expected: runtime
+          mechanisms: [guard, scx_error]
+          sites:
+            - {file: kernel/sched/ext.c, line: 1744, end_line: 1750, symbol: find_dsq_for_dispatch}
+            - {file: kernel/sched/ext.c, line: 1098, end_line: 1106, symbol: ops_cpu_valid}
+        references:
+          - {file: kernel/sched/ext.c, line: 1735, symbol: find_dsq_for_dispatch}

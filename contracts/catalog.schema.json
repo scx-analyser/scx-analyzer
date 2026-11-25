@@ -1,62 +1,497 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "scx-analyzer/catalog.schema.json",
-  "title": "Invariant catalog (owned by Epic A)",
+  "title": "Invariant catalog (owned by Epic A, consumed by Epics C and D)",
+  "description": "Invariants that sched_ext kfuncs must respect on the pinned kernel. Each top-level entry is one invariant family (I1, I2, ...): the id checker plug-ins register under and findings report. Its 'rules' state which shared scheduler state the kfuncs modify (directly or along their kernel call paths) and which lock / predicate / state-transition discipline protects each modification. Field-level requirements are explicit 'obligations' that bind one access (struct, fields, instance, op) at named source sites to the specific lock instances and predicates it requires. Calling-context facts (kfunc sets, callbacks, program types, locks held on callback entry) are supporting entry-state information, kept in 'requires' or in role=entry_state rules, and never stand for a field-protection requirement. Epic C turns obligations into checks over the call graph; Epic D joins findings and catalog/ground_truth.csv on (kfunc, invariant family id), with the rule id as the finer key.",
   "type": "object",
   "required": ["kernel_version", "invariants"],
   "additionalProperties": false,
   "properties": {
-    "kernel_version": {"type": "string"},
+    "kernel_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Kernel tag the entries were derived from. Must equal the kernel_version of the call graph and findings it is used with (the checker rejects mismatches). Real catalog files carry /KERNEL_VERSION once it is pinned; the illustrative fixture carries the call-graph fixture's value (tools/validate_contracts.py checks both)."
+    },
+    "kernel_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Full 40-hex commit the references (file:line) were verified against. Required as soon as any rule is source_verified (schema if/then); tools/validate_contracts.py also checks it against the known commit of kernel_version."
+    },
+    "illustrative": {
+      "type": "boolean",
+      "description": "true for hand-written fixtures; mirrors callgraph.schema.json. Real catalog/invariants/*.yaml files omit it or set false."
+    },
     "invariants": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["id", "title", "category", "objects", "access", "requires", "applies_to", "enforcement_expected"],
-        "additionalProperties": false,
-        "properties": {
-          "id": {"type": "string", "pattern": "^I[0-9]+(\\.[0-9]+)?$", "description": "e.g. I1, I2.3"},
-          "title": {"type": "string"},
-          "description": {"type": "string"},
-          "category": {"enum": ["context_locking", "ownership_state", "argument_validity", "value_range"]},
-          "objects": {
-            "type": "array",
-            "description": "Shared state involved, as struct + field paths (e.g. task_struct / scx.ops_state).",
-            "items": {
-              "type": "object",
-              "required": ["struct", "fields"],
-              "properties": {
-                "struct": {"type": "string"},
-                "fields": {"type": "array", "items": {"type": "string"}}
-              }
-            }
-          },
-          "access": {"enum": ["read", "write", "rw"]},
-          "requires": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "locks": {"type": "array", "items": {"type": "string"}, "description": "Symbolic lock names: rq, task_rq, dsq, pi_lock, none"},
-              "contexts": {"type": "array", "items": {"type": "string"}, "description": "ops callbacks or SCX_KF_* masks"},
-              "predicates": {"type": "array", "items": {"type": "string"}, "description": "Guard predicates that must hold before the write, e.g. ops_cpu_valid(cpu)"},
-              "transitions": {
-                "type": "array",
-                "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2},
-                "description": "Allowed [from, to] state transitions"
-              }
-            }
-          },
-          "applies_to": {"type": "array", "items": {"type": "string"}, "description": "kfunc names, or [\"*\"]"},
-          "enforcement_expected": {"enum": ["static", "runtime", "static+runtime", "none", "unknown"]},
-          "references": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["file"],
-              "properties": {"file": {"type": "string"}, "line": {"type": "integer"}, "note": {"type": "string"}}
-            }
-          }
+      "minItems": 1,
+      "description": "Invariant families, one entry per family id. Family ids must be unique within a file and across all catalog files; rule ids likewise (tools/validate_contracts.py checks this; the checker runner rejects duplicate family ids).",
+      "items": {"$ref": "#/$defs/invariant"}
+    }
+  },
+  "$defs": {
+    "invariant": {
+      "type": "object",
+      "required": ["id", "title", "description", "category", "rules"],
+      "additionalProperties": false,
+      "description": "One invariant family. 'id' is what checker.checkers.register() takes and what findings.schema.json 'invariant' carries.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^I[1-9][0-9]*$",
+          "description": "Family id: I1 locking of protected scheduler-state writes (A3), I2 task/DSQ ownership and state transitions (A4), I3 CPU/affinity checks before scheduling-state modifications (A5), I4 value ranges (A6). Checker plug-ins are registered per family id."
+        },
+        "title": {"type": "string", "minLength": 1, "description": "One-line statement of the family."},
+        "description": {"type": "string", "minLength": 1, "description": "Scope of the family and conventions shared by its rules."},
+        "category": {
+          "enum": ["context_locking", "ownership_state", "argument_validity", "value_range"],
+          "description": "Kind of invariant; normally context_locking=I1 (locking of protected writes, plus supporting entry state), ownership_state=I2, argument_validity=I3, value_range=I4. Every rule of the family has the same category."
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/rule"},
+          "description": "Concrete rules of the family (per kfunc set / kfunc group)."
         }
       }
+    },
+    "rule": {
+      "type": "object",
+      "required": ["id", "title", "description", "category", "status", "objects", "access", "requires", "applies_to", "enforcement", "references"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^I[1-9][0-9]*(\\.[a-z][a-z0-9_]*)+$",
+          "description": "Stable id '<family>.<slug>[.<slug>...]' with lower_snake slugs, e.g. I1.dsq_insert.context. The prefix must equal the enclosing family id (checked by tools/validate_contracts.py). ground_truth.csv and finding evidence may refer to it."
+        },
+        "title": {"type": "string", "minLength": 1, "description": "One-line statement of the invariant."},
+        "description": {"type": "string", "minLength": 1, "description": "Precise prose: what must hold, why it matters, known exceptions."},
+        "category": {
+          "enum": ["context_locking", "ownership_state", "argument_validity", "value_range"],
+          "description": "Kind of invariant; normally context_locking=I1, ownership_state=I2, argument_validity=I3, value_range=I4."
+        },
+        "status": {
+          "enum": ["draft", "source_verified"],
+          "description": "source_verified = every cited source observation (references, sites, evidence, paths) was checked against kernel_commit. It is not a claim about runtime behaviour, and it does not by itself turn a proposed requirement into an established one: that is stated per obligation by 'basis'. A source_verified rule may not contain basis=hypothesis obligations (tools/validate_contracts.py)."
+        },
+        "role": {
+          "enum": ["protection", "entry_state"],
+          "description": "protection = the rule's normative content is its 'obligations' (field writes and what protects them); at least one obligation is required. entry_state = supporting calling-context / callback-entry facts (kfunc sets, callbacks, program types, locks held on entry, runtime context checks); it has objects [], access none and no obligations, and consumers must never compile it into a field-protection policy. Omitted = generic rule (e.g. I2 transitions, I3 predicates). Checked by tools/validate_contracts.py."
+        },
+        "objects": {
+          "type": "array",
+          "description": "Shared kernel state the rule is about (summary). Every obligation's access must name a struct and fields listed here. Empty for entry_state rules.",
+          "items": {"$ref": "#/$defs/object"}
+        },
+        "access": {
+          "enum": ["read", "write", "rw", "none"],
+          "description": "How the covered kfuncs access 'objects' (default for objects without their own 'access'); 'none' for pure context rules."
+        },
+        "requires": {
+          "$ref": "#/$defs/requires",
+          "description": "Rule-level conditions. requires.locks are callback-entry or kfunc-wide context facts (e.g. irqs disabled, no BPF spin lock held); they never express which lock protects a particular field. Field protection is stated only in 'obligations'."
+        },
+        "obligations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/obligation"},
+          "description": "Field-to-requirement bindings: which access (struct, fields, instance, op), at which source sites, requires which specific lock instances and predicates. Multiple obligations covering the same access are conjunctive. Obligation ids are unique within the rule; refer to one as '<rule id>/<obligation id>'."
+        },
+        "applies_to": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^(\\*|[A-Za-z_][A-Za-z0-9_]*)$"},
+          "description": "Root kfunc names (as in catalog/kfuncs.csv and call graph roots) the rule constrains, or exactly [\"*\"] ('*' is not mixed with names; checked by tools/validate_contracts.py). It selects root applicability only; the transitive write sites are the obligations' 'sites'."
+        },
+        "enforcement": {"$ref": "#/$defs/enforcement"},
+        "references": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/reference"},
+          "description": "Kernel source / documentation locations that define the invariant."
+        },
+        "notes": {"type": "string", "description": "Free-form remarks: open questions, version caveats, link to the write-up."}
+      }
+    },
+    "ident": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$", "description": "C identifier (lower case)."},
+    "callback": {"type": "string", "pattern": "^ops\\.[a-z_]+$", "description": "sched_ext_ops callback, e.g. ops.enqueue."},
+    "object": {
+      "type": "object",
+      "required": ["struct", "fields"],
+      "additionalProperties": false,
+      "description": "A struct and field paths; '<struct>.<field>' is exactly a callgraph.schema.json fieldref (task_struct + scx.ops_state = task_struct.scx.ops_state).",
+      "properties": {
+        "struct": {"$ref": "#/$defs/ident", "description": "C struct name without 'struct', e.g. task_struct, rq, scx_dispatch_q."},
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z_][a-z0-9_\\[\\]]*(\\.[a-z_][a-z0-9_\\[\\]]*)*$"},
+          "description": "Field paths relative to the struct, e.g. scx.ops_state, scx.dsq_list."
+        },
+        "access": {"enum": ["read", "write", "rw"], "description": "Overrides the entry-level 'access' for this object."}
+      }
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Conditions that must hold; at least one of contexts / contexts_any_of / locks / predicates / transitions.",
+      "properties": {
+        "contexts": {"$ref": "#/$defs/contexts"},
+        "contexts_any_of": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"$ref": "#/$defs/contexts"},
+          "description": "Alternative calling contexts, one per BTF set: a call is allowed if it satisfies at least one alternative. Alternatives are never combined (e.g. dispatch-set callbacks with unlocked-set program types). Mutually exclusive with 'contexts'."
+        },
+        "locks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/lock"},
+          "description": "Callback-entry facts (where=callback_entry, which seed C2's entry lockset) or kfunc-wide context conditions (where=access_site, e.g. irqs_disabled, bpf_spin_lock not_held). Not field protection: obligations carry that."
+        },
+        "predicates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/predicate"},
+          "description": "Guard predicates that must hold before the protected access (I3, I4)."
+        },
+        "transitions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/transition"},
+          "description": "The only legal transitions of the state field in 'objects' (I2). Unlisted transitions are violations."
+        }
+      },
+      "not": {"required": ["contexts", "contexts_any_of"]}
+    },
+    "contexts": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "One calling context: the kfunc set the kfuncs are registered in, the callbacks that set's filter admits, and the program types the set is registered for. The lists inside one context are conjunctive and describe a single BTF set. A kfunc registered in several sets is allowed when ANY one of its sets allows the call; such rules use requires.contexts_any_of (one entry per set), never one context listing several sets.",
+      "properties": {
+        "kfunc_sets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^scx_kfunc_ids_[a-z_]+$"},
+          "description": "The (single) BTF kfunc id set this context describes, e.g. scx_kfunc_ids_enqueue_dispatch (KfuncGroup ENQUEUE in checker/context.py). Kfuncs in several sets use requires.contexts_any_of.",
+          "maxItems": 1
+        },
+        "callbacks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/callback"},
+          "description": "sched_ext_ops callbacks allowed to call the kfuncs (from scx_kf_allow_flags[]), written ops.<name>; checker/context.py get_context() accepts this form (it strips 'ops.'). Omitted = not restricted per callback."
+        },
+        "program_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["BPF_PROG_TYPE_STRUCT_OPS", "BPF_PROG_TYPE_SYSCALL", "BPF_PROG_TYPE_TRACING"]},
+          "description": "BPF program types the kfunc sets are registered for (register_btf_kfunc_id_set())."
+        }
+      }
+    },
+    "lock": {
+      "type": "object",
+      "required": ["lock", "state", "where"],
+      "additionalProperties": false,
+      "properties": {
+        "lock": {
+          "$ref": "#/$defs/ident",
+          "description": "Symbolic lock, same vocabulary as callgraph events and checker/context.py entry-lock facts: rq (the rq the callback was invoked with, C2's 'callback's rq'; for task ops that is task_rq(p)), task_rq (rq of a task argument where it is not the callback's rq), dsq, pi_lock, scx_dump_lock; pseudo-locks irqs_disabled, preempt_disabled, rcu_read."
+        },
+        "instance": {"type": "string", "minLength": 1, "description": "Optional C expression naming the object whose lock this is, e.g. task_rq(p), dsq."},
+        "state": {
+          "enum": ["held", "not_held"],
+          "description": "Required state. not_held at callback_entry states the documented precondition of the cited call sites (e.g. SCX_CALL_OP*(..., NULL, ...) with no rq acquired on those paths); it is not an object-specific absence fact for every ambient lock of that kind."
+        },
+        "where": {
+          "enum": ["callback_entry", "access_site"],
+          "description": "callback_entry = held by the core when it invokes 'callbacks' (seeds the checker's entry lockset); access_site = must hold where 'objects' are accessed / where the kfunc runs."
+        },
+        "callbacks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/callback"},
+          "description": "For where=callback_entry: callbacks this applies to (default: all of requires.contexts.callbacks)."
+        },
+        "note": {"type": "string", "description": "Evidence or caveat for this lock fact, e.g. the call site that holds it."}
+      }
+    },
+    "predicate": {
+      "type": "object",
+      "required": ["expr"],
+      "additionalProperties": false,
+      "properties": {
+        "expr": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Source-level C condition that must be true, matched against callgraph guard 'cond', e.g. ops_cpu_valid(sch, cpu, where)."
+        },
+        "captures": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/capture"},
+          "description": "Values the predicate compares that were captured earlier on the path (snapshots); the predicate is about those snapshots, not about a fresh read of a variable that may have changed since."
+        },
+        "evaluated_at": {"$ref": "#/$defs/site", "description": "Where the predicate is evaluated."},
+        "checked_by": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/ident"}, "description": "Kernel functions that evaluate the predicate."},
+        "on_failure": {
+          "enum": ["return", "error", "fallback", "continue"],
+          "description": "What the source does when the predicate fails; same enum as callgraph guard 'action'. Use return only where an explicit return exits the path (scx_error() alone does not)."
+        },
+        "note": {"type": "string", "description": "Where or when the predicate applies, or what the failure path does."}
+      }
+    },
+    "transition": {
+      "type": "object",
+      "required": ["from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "from": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$", "description": "Source state constant, e.g. SCX_OPSS_QUEUED."},
+        "to": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$", "description": "Target state constant."},
+        "op": {
+          "enum": ["set", "set_release", "cmpxchg"],
+          "description": "Update primitive: plain atomic set, atomic_long_set_release(), or atomic_long_try_cmpxchg()."
+        },
+        "lock": {"$ref": "#/$defs/ident", "description": "Lock that must be held while making the transition, if any."},
+        "sites": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/ident"}, "description": "Kernel functions that perform it."}
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "required": ["expected", "mechanisms"],
+      "additionalProperties": false,
+      "description": "How the kernel is expected to enforce the invariant: the hypothesis the checker confirms or refutes, and what A7's ground truth records.",
+      "properties": {
+        "expected": {
+          "enum": ["static", "runtime", "static+runtime", "none", "unknown"],
+          "description": "Checks active on a production kernel. static = at BPF load / verify time (mechanisms kfunc_set, verifier); runtime = during execution on every kernel (lock, scx_error, warn, guard, atomic, kf_mask); static+runtime = both; none = neither (potential bug; mechanisms [none], optionally plus lockdep, never unknown); unknown = not determined. lockdep never counts toward runtime because it only runs with CONFIG_LOCKDEP. Same enum as findings.schema.json static_or_runtime; tools/validate_contracts.py checks it against 'mechanisms'."
+        },
+        "mechanisms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/mechanism"},
+          "description": "Expected mechanisms; same enum as findings.schema.json enforcement (tools/validate_contracts.py checks they stay in sync)."
+        },
+        "sites": {"type": "array", "items": {"$ref": "#/$defs/reference"}, "description": "Where the mechanisms live (file:line)."}
+      }
+    },
+    "mechanism": {
+      "enum": ["kfunc_set", "verifier", "kf_mask", "lock", "lockdep", "scx_error", "warn", "guard", "atomic", "none", "unknown"],
+      "description": "kfunc_set = membership of a BTF kfunc set registered for a program type (static); verifier = verifier-time check, incl. the set's .filter scx_kfunc_context_filter() (static); kf_mask = legacy runtime current->scx.kf_mask / scx_kf_allowed() (absent in v7.1); lock = lock taken / held; lockdep = lockdep_assert_*(), active only with CONFIG_LOCKDEP and therefore not counted toward enforcement.expected runtime; scx_error = scx_error() aborts the BPF scheduler; warn = WARN_ON*(); guard = condition check with early return / fallback; atomic = atomic op or cmpxchg; none = not enforced (only with expected none); unknown = not determined."
+    },
+    "reference": {
+      "type": "object",
+      "required": ["file"],
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$",
+          "description": "Path relative to the kernel tree root, e.g. kernel/sched/ext.c."
+        },
+        "line": {"type": "integer", "minimum": 1, "description": "First line."},
+        "end_line": {"type": "integer", "minimum": 1, "description": "Last line of a range (>= line)."},
+        "symbol": {"type": "string", "description": "Function, macro or table at that location."},
+        "note": {"type": "string", "description": "What the cited lines show."}
+      },
+      "dependentRequired": {"end_line": ["line"]}
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$",
+      "description": "Path relative to the kernel tree root, e.g. kernel/sched/ext.c."
+    },
+    "capture": {
+      "type": "object",
+      "required": ["var", "expr", "function", "file", "line"],
+      "additionalProperties": false,
+      "description": "var = expr, evaluated in function at file:line.",
+      "properties": {
+        "var": {"$ref": "#/$defs/ident"},
+        "expr": {"type": "string", "minLength": 1},
+        "function": {"$ref": "#/$defs/ident"},
+        "file": {"$ref": "#/$defs/path"},
+        "line": {"type": "integer", "minimum": 1},
+        "note": {"type": "string"}
+      }
+    },
+    "site": {
+      "type": "object",
+      "required": ["function", "file", "line"],
+      "additionalProperties": false,
+      "description": "A source location inside a named kernel function.",
+      "properties": {
+        "function": {"$ref": "#/$defs/ident"},
+        "file": {"$ref": "#/$defs/path"},
+        "line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "note": {"type": "string"}
+      },
+      "dependentRequired": {"end_line": ["line"]}
+    },
+    "lockref": {
+      "type": "object",
+      "required": ["lock", "instance"],
+      "additionalProperties": false,
+      "description": "A specific lock: kind plus the object that owns it.",
+      "properties": {
+        "lock": {
+          "$ref": "#/$defs/ident",
+          "description": "Lock kind: rq (the rq lock of 'instance'), dsq (the lock of the scx_dispatch_q 'instance'), pi_lock (instance->pi_lock), scx_dump_lock, ..."
+        },
+        "instance": {
+          "type": "string",
+          "minLength": 1,
+          "description": "C expression, in the scope of the site / step function, of the object that owns the lock, e.g. dst_rq, task_rq(p), src_dsq."
+        }
+      }
+    },
+    "obligation_lock": {
+      "type": "object",
+      "required": ["lock", "instance", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "lock": {
+          "$ref": "#/$defs/ident",
+          "description": "Lock kind: rq (the rq lock of 'instance'), dsq (the lock of the scx_dispatch_q 'instance'), pi_lock (instance->pi_lock), scx_dump_lock, ..."
+        },
+        "instance": {
+          "type": "string",
+          "minLength": 1,
+          "description": "C expression, in the scope of the site / step function, of the object that owns the lock, e.g. dst_rq, task_rq(p), src_dsq."
+        },
+        "state": {"enum": ["held", "not_held"]},
+        "mode": {"enum": ["exclusive", "shared"], "description": "Default exclusive (spinlocks, write side); shared = read side of an rwsem/rwlock."},
+        "note": {"type": "string"}
+      }
+    },
+    "access": {
+      "type": "object",
+      "required": ["struct", "fields", "op", "instance"],
+      "additionalProperties": false,
+      "description": "One access to fields of one object instance.",
+      "properties": {
+        "struct": {"$ref": "#/$defs/ident", "description": "C struct name without 'struct'."},
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z_][a-z0-9_\\[\\]]*(\\.[a-z_][a-z0-9_\\[\\]]*)*$"},
+          "description": "Field paths relative to the struct, e.g. scx.ops_state, scx.dsq_list."
+        },
+        "op": {
+          "enum": ["write", "atomic", "read"],
+          "description": "write = plain store, read-modify-write, list or rbtree update; atomic = atomic_*() / cmpxchg (does not inherit plain-write rules); read."
+        },
+        "ordering": {"enum": ["relaxed", "acquire", "release", "full"], "description": "Only with op atomic: the required memory ordering."},
+        "instance": {
+          "type": "string",
+          "minLength": 1,
+          "description": "C expression of the accessed object in the scope of every site function, e.g. p, dsq, dst_dsq."
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["kind", "file", "line"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": ["lockdep_assert", "runtime_check", "warn_only", "acquired_on_path", "kernel_comment"],
+          "description": "lockdep_assert = lockdep_assert_*() of this lock instance; runtime_check = production check that stops the access on failure (scx_error/WARN followed by a return, or BUG); warn_only = production WARN that reports a violation but lets the access proceed (detection, not enforcement); acquired_on_path = the lock is taken on the path before the site; kernel_comment = a kernel comment states the rule."
+        },
+        "file": {"$ref": "#/$defs/path"},
+        "line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "symbol": {"type": "string"},
+        "note": {"type": "string"}
+      },
+      "dependentRequired": {"end_line": ["line"]}
+    },
+    "path_step": {
+      "type": "object",
+      "required": ["function", "file", "line", "held"],
+      "additionalProperties": false,
+      "properties": {
+        "function": {"$ref": "#/$defs/ident"},
+        "file": {"$ref": "#/$defs/path"},
+        "line": {"type": "integer", "minimum": 1},
+        "call": {"type": "string", "description": "Call expression at 'line' that leads to the next step (gives the argument binding)."},
+        "held": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/lockref"},
+          "description": "Locks held at 'line', instances in this function's scope; [] = none of the tracked locks."
+        },
+        "note": {"type": "string"}
+      }
+    },
+    "call_path": {
+      "type": "object",
+      "required": ["root", "steps"],
+      "additionalProperties": false,
+      "description": "One concrete call path from a root kfunc down to the obligation's site; the last step is in the site function.",
+      "properties": {
+        "root": {"$ref": "#/$defs/ident"},
+        "entry": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/site"},
+          "description": "Kernel frames that invoke the BPF callback which calls the root (entry state)."
+        },
+        "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/path_step"}}
+      }
+    },
+    "obligation": {
+      "type": "object",
+      "required": ["id", "access", "sites", "basis", "evidence"],
+      "additionalProperties": false,
+      "description": "One field-to-requirement binding. Expressions (access.instance, lock instances, predicates, when) are in the scope of each site's function.",
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "access": {"$ref": "#/$defs/access"},
+        "sites": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/site"}, "description": "Source sites where the access happens."},
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Applicability condition (C expression at the sites); the obligation applies only when it holds. A consumer that cannot resolve it reports UNKNOWN."
+        },
+        "requires": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "locks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/obligation_lock"}},
+            "predicates": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/predicate"}}
+          },
+          "description": "What must hold at the sites; all entries are conjunctive. May be omitted only for op atomic with 'ordering' (tools/validate_contracts.py)."
+        },
+        "basis": {
+          "enum": ["checked", "documented", "observed", "hypothesis"],
+          "description": "Why this is a requirement. checked = the source checks it on every path to the sites (needs lockdep_assert or runtime_check evidence); documented = a kernel comment states it, or a WARN-only check expects it without enforcing it (needs kernel_comment or warn_only evidence); observed = the lock is acquired or held on every inspected path but the kernel states no rule (needs acquired_on_path or lockdep_assert evidence); hypothesis = proposed, not established by the source (draft rules only)."
+        },
+        "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}},
+        "paths": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/call_path"}},
+        "note": {"type": "string"}
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "invariants": {"contains": {"properties": {"rules": {"contains": {"properties": {"status": {"const": "source_verified"}}, "required": ["status"]}}}}}
+        }
+      },
+      "then": {"required": ["kernel_commit"]}
+    }
+  ]
 }
