@@ -1,0 +1,35 @@
+name: validation-vm
+on:
+  push:
+    branches: [main]
+    paths: [validation/vm/**, KERNEL_COMMIT, .github/workflows/validation-vm.yml]
+  pull_request:
+    paths: [validation/vm/**, KERNEL_COMMIT, .github/workflows/validation-vm.yml]
+  workflow_dispatch:
+jobs:
+  selftests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and VM dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential flex bison bc cpio libelf-dev libssl-dev zlib1g-dev \
+            clang llvm lld qemu-system-x86 busybox-static cmake libdw-dev
+          pip install virtme-ng
+      - name: Build pahole 1.30 (Ubuntu's 1.25 lacks kfunc decl tags)
+        run: |
+          git clone -q --depth 1 -b v1.30 https://git.kernel.org/pub/scm/devel/pahole/pahole.git "$RUNNER_TEMP/pahole"
+          cmake -S "$RUNNER_TEMP/pahole" -B "$RUNNER_TEMP/pahole/build" -DCMAKE_INSTALL_PREFIX=/usr -D__LIB=lib
+          cmake --build "$RUNNER_TEMP/pahole/build" -j"$(nproc)"
+          sudo cmake --install "$RUNNER_TEMP/pahole/build"
+          pahole --version
+      - name: Allow KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - name: Build kernel, boot VM, run sched_ext selftests
+        env:
+          KERNEL_SRC: ${{ runner.temp }}/linux
+        run: validation/vm/run-selftests.sh

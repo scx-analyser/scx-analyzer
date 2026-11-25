@@ -1,0 +1,12 @@
+# Applied on top of virtme-ng's minimal config and tools/testing/selftests/sched_ext/config.
+# DEBUG_INFO is not user-selectable on its own; pick a DWARF variant so BTF survives olddefconfig.
+CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT=y
+CONFIG_DEBUG_INFO_BTF=y
+CONFIG_BPF_JIT=y
+CONFIG_SCHED_CLASS_EXT=y
+CONFIG_NUMA=y
+CONFIG_HOTPLUG_CPU=y
+# lockdep: catches locking violations the verifier and scx_error() miss (outcome class "lockdep")
+CONFIG_PROVE_LOCKING=y
+CONFIG_DEBUG_ATOMIC_SLEEP=y
+CONFIG_KALLSYMS_ALL=y
