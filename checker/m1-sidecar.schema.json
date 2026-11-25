@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "M1 proposed handoff: hand-reviewed site bindings, not analysis proofs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "origin", "source", "graph_sha256", "extraction_claim", "sites"],
+  "properties": {
+    "format": {"const": "scxa.m1.sidecar.v1"},
+    "origin": {"const": "hand_reviewed_source_annotations"},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "commit"],
+      "properties": {
+        "version": {"const": "v7.1"},
+        "commit": {"const": "8cd9520d35a6c38db6567e97dd93b1f11f185dc6"}
+      }
+    },
+    "graph_sha256": {"$ref": "#/$defs/sha256"},
+    "extraction_claim": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "repository", "revision", "url", "generator"],
+      "properties": {
+        "kind": {"const": "epic_b_extraction"},
+        "repository": {"const": "scx-analyser/scx-analyzer"},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "url": {"type": "string", "pattern": "^https://[^\\s]+$"},
+        "generator": {"$ref": "#/$defs/text"},
+        "config_sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]}
+      }
+    },
+    "sites": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["root", "rule_id", "obligation_id", "function", "file", "line", "event_index", "field", "access_kind", "object", "reference"],
+        "properties": {
+          "root": {"enum": ["scx_bpf_kick_cpu", "scx_bpf_cpuperf_set", "scx_bpf_test_and_clear_cpu_idle"]},
+          "rule_id": {"type": "string", "pattern": "^I[13]\\.[a-z][a-z0-9_.]*$"},
+          "obligation_id": {"$ref": "#/$defs/text"},
+          "function": {"$ref": "#/$defs/text"},
+          "file": {"$ref": "#/$defs/text"},
+          "line": {"type": "integer", "minimum": 1},
+          "event_index": {"type": "integer", "minimum": 0},
+          "field": {"$ref": "#/$defs/text"},
+          "access_kind": {"enum": ["write", "atomic"]},
+          "object": {"$ref": "#/$defs/text"},
+          "reference": {
+            "type": "object", "additionalProperties": false,
+            "required": ["file", "symbol", "line", "end_line"],
+            "properties": {
+              "file": {"$ref": "#/$defs/text"}, "symbol": {"$ref": "#/$defs/text"},
+              "line": {"type": "integer", "minimum": 1},
+              "end_line": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "text": {"type": "string", "pattern": "\\S"}
+  }
+}
