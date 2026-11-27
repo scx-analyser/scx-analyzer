@@ -224,6 +224,25 @@ class Dwarf:
         node = self.composite(ref)
         return node[1].get("name") if node else None
 
+    def path_owners(self, root: int, offset: int, size: int) -> tuple[list[str], list[str | None]]:
+        """Like path(), plus the name of the composite that declares each member."""
+        names, owners = [], []
+        current = root
+        for _ in range(16):
+            stripped, _ = self.strip(current)
+            node = self.composite(stripped)
+            if not node:
+                break
+            best = next((m for m in self.members(stripped) if m.contains(offset, size)), None)
+            if best is None or best.bitfield:
+                break
+            if best.name:
+                names.append(best.name)
+                owners.append(node[1].get("name"))
+            offset -= best.offset
+            current = best.type_ref
+        return names, owners
+
     def path(self, root: int, offset: int, size: int) -> tuple[list[str], int | None]:
         """Member names leading to the bytes [offset, offset+size) of composite `root`,
         and the DWARF type at the end of the path."""
@@ -413,6 +432,27 @@ class FieldResolver:
             return None
         ref = TRACKED[self.tracked[place.root]] + "." + ".".join(names)
         return ref if _FIELD_OK.match(ref) else None
+
+    def slot(self, value: str) -> str | None:
+        """Name of the function-pointer slot an indirect call loads its target from:
+        ops.<op> for struct sched_ext_ops (SCX_CALL_OP*), sched_class.<method>, else
+        <struct>.<member> of the struct that holds the pointer."""
+        inst = self._fn.defs.get(value) if self._fn else None
+        if inst is None:
+            return None
+        m = _LOAD.match(_strip_attachments(inst.text.split(" = ", 1)[1]))
+        if not m or m.group(1).strip() != "ptr":
+            return None
+        place = self.place(m.group(2))
+        if place is None:
+            return None
+        names, owners = self.dwarf.path_owners(place.root, place.offset, 8)
+        if not names:
+            return None
+        owner = owners[-1]
+        if owner == "sched_ext_ops":
+            return "ops." + names[-1]
+        return f"{owner}.{names[-1]}" if owner else names[-1]
 
     def access(self, inst: Instruction) -> tuple[str, str, bool] | None:
         """(read|write|rmw, fieldref, volatile) for a load/store or a memory-operand
