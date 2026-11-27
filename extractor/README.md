@@ -124,6 +124,15 @@ Not modelled: `cond` on non-guard events (which branch an event is in), loops, a
 `switch` statements. Every `writes` entry has a `write`/`atomic` event and every callee a `call` event.
 On v7.1: 188 guards, 25 locks, 33 unlocks, 29 assertions, 44 errors, 35 warns, 84 writes, 15 atomics.
 
+### Indirect calls (B7)
+
+Calls through a function pointer are always kept as `kind: indirect` edges (and `call` events). The target is the
+slot the pointer is loaded from, read from DWARF: `ops.<op>` for `struct sched_ext_ops` (the `SCX_CALL_OP*`
+calls into the BPF scheduler, e.g. `ops.enqueue` at ext.c:1948, `ops.dispatch` at 2840/2844),
+`sched_class.<method>` for scheduling-class methods (visible with `--expand kernel/sched/core.c`), otherwise
+`<struct>.<member>`. A pointer whose origin cannot be traced is `<indirect>`. Targets are not resolved to
+implementations: the BPF ops are not in the kernel image, and a `sched_class` method can belong to any class.
+
 Notes:
 - Inlined helpers: use debug-info `inlinedAt` or build analysis IR with `-fno-inline`.
 - Indirect calls (`SCX_CALL_OP*`, `sched_class` methods) must appear as `kind: indirect`, never dropped.

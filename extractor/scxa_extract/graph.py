@@ -259,7 +259,8 @@ class Program:
                     for event in events:
                         facts.add_event(*at, event)
             elif kind == "indirect":
-                facts.add_site("<indirect>", "indirect", *at)
+                slot = self.fields[id(module)].slot(value) or "<indirect>"
+                facts.add_site(slot, "indirect", *at)
             elif kind == "asm":
                 for event in extractor.asm_events(inst, file, ctx.line):
                     facts.add_event(*at, event)
