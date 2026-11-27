@@ -8,7 +8,7 @@ from pathlib import Path
 import jsonschema
 
 from extractor.scxa_extract import extract
-from extractor.scxa_extract.graph import Program
+from extractor.scxa_extract.graph import Limits, Program
 from extractor.scxa_extract.ir import btf_kfunc_sets, call_args, call_target, parse_di, parse_module
 
 REPO = Path(__file__).resolve().parents[2]
@@ -59,6 +59,9 @@ declare void @llvm.dbg.value(metadata, metadata, metadata)
 '''
 
 
+EXPAND_ALL = Limits(expand=("*",))
+
+
 def sample_program(tmp: Path) -> Program:
     path = tmp / "sample.ll"
     path.write_text(SAMPLE, encoding="utf-8")
@@ -100,7 +103,7 @@ class ParserTests(unittest.TestCase):
 class GraphTests(unittest.TestCase):
     def setUp(self):
         self.program = sample_program(Path(tempfile.mkdtemp()))
-        self.graph = self.program.to_json(["kfunc_a"], {"kfunc_a"}, "v7.1", "0" * 40)
+        self.graph = self.program.to_json(["kfunc_a"], {"kfunc_a"}, "v7.1", "0" * 40, EXPAND_ALL)
 
     def test_schema_valid(self):
         jsonschema.validate(self.graph, SCHEMA)
@@ -131,6 +134,52 @@ class GraphTests(unittest.TestCase):
             self.program.to_json(["nope"], set(), "v7.1", None)
 
 
+class LimitTests(unittest.TestCase):
+    """B4: depth limit, stop-list and boundary files."""
+
+    def setUp(self):
+        self.program = sample_program(Path(tempfile.mkdtemp()))
+
+    def graph(self, limits):
+        return self.program.to_json(["kfunc_a"], {"kfunc_a"}, "v7.1", None, limits)["nodes"]
+
+    def test_header_helper_outside_expanded_files_is_a_boundary(self):
+        nodes = self.graph(Limits())
+        self.assertEqual(("boundary", [], 1), (nodes["helper"]["kind"], nodes["helper"]["callees"], nodes["helper"]["depth"]))
+        self.assertEqual("include/linux/x.h", nodes["helper"]["file"])
+        self.assertNotIn("leaf", nodes)      # behind the boundary
+
+    def test_expand_glob_follows_into_the_file(self):
+        nodes = self.graph(Limits(expand=("include/linux/*.h", "kernel/sched/ext.c")))
+        self.assertEqual("internal", nodes["helper"]["kind"])
+        self.assertEqual("internal", nodes["leaf"]["kind"])
+
+    def test_depth_limit_records_but_does_not_expand(self):
+        nodes = self.graph(Limits(max_depth=1, expand=("*",)))
+        self.assertEqual("boundary", nodes["helper"]["kind"])
+        self.assertNotIn("leaf", nodes)
+        nodes = self.graph(Limits(max_depth=0, expand=("*",)))
+        self.assertEqual("kfunc", nodes["kfunc_a"]["kind"])   # roots are always expanded
+        self.assertEqual("boundary", nodes["helper"]["kind"])
+
+    def test_stop_list_drops_the_call_and_the_node(self):
+        nodes = self.graph(Limits(stop=("ext_\\w+",), expand=("*",)))
+        self.assertNotIn("ext_fn", nodes)
+        self.assertNotIn("ext_fn", {c["target"] for c in nodes["kfunc_a"]["callees"]})
+
+    def test_default_stop_list_covers_lockdep_tracing_printk(self):
+        limits = Limits()
+        for name in ("lock_acquire", "lockdep_rcu_suspicious", "__SCT__tp_func_sched_ext_event",
+                     "__do_trace_sched_ext_dump", "_printk_deferred", "__ubsan_handle_x", "class_rcu_constructor"):
+            self.assertTrue(limits.stopped(name), name)
+        for name in ("_raw_spin_lock", "scx_kick_cpu", "irq_work_queue", "lock_is_held_type", "lockdep_assert_rq_held"):
+            self.assertFalse(limits.stopped(name), name)
+
+    def test_negative_depth_rejected(self):
+        with self.assertRaises(ValueError):
+            Limits(max_depth=-1)
+
+
 @unittest.skipUnless((BUILD / "kernel/sched/build_policy.ll").exists(),
                      "real IR not built (run extractor/build_kernel_ir.sh)")
 class RealIRTests(unittest.TestCase):
@@ -144,6 +193,11 @@ class RealIRTests(unittest.TestCase):
     def test_all_kfuncs_are_roots(self):
         self.assertEqual(59, len(self.graph["roots"]))
         self.assertTrue(all(self.graph["nodes"][r]["kind"] == "kfunc" for r in self.graph["roots"]))
+
+    def test_core_c_is_a_boundary_by_default(self):
+        node = self.graph["nodes"]["raw_spin_rq_lock_nested"]
+        self.assertEqual(("boundary", "kernel/sched/core.c", []), (node["kind"], node["file"], node["callees"]))
+        self.assertFalse(any(name.startswith(("lock_acquire", "__SCT__")) for name in self.graph["nodes"]))
 
     def test_known_v7_1_edges(self):
         def callees(name):

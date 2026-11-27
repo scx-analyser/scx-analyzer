@@ -9,7 +9,9 @@ or an out-of-line body in more than one module) are merged into one node.
 from __future__ import annotations
 
 import csv
+import re
 from collections import deque
+from fnmatch import fnmatch
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,6 +22,42 @@ GENERATOR = "scxa-extract 0.1"
 
 def is_intrinsic(name: str) -> bool:
     return name.startswith("llvm.")
+
+
+# Functions that never touch the tracked scheduler state: their calls are left out
+# of the graph entirely (no node, no edge). Patterns are full-match regexes.
+DEFAULT_STOP = (
+    r"lock_acquire|lock_release|lock_pin_lock|lock_unpin_lock|lock_repin_lock|lockdep_(?!assert)\w+|"
+    r"debug_lockdep_rcu_enabled|rcu_is_watching|rcu_read_lock_held\w*|__rcu_read_(?:un)?lock|"
+    r"rcu_read_(?:un)?lock(?:_sched)?(?:_notrace)?|class_rcu_\w+|rcu_lock_(?:acquire|release)|__rcu_\w+",
+    r"__SCT__\w+|__SCK__\w+|__traceiter_\w+|__do_trace_\w+|trace_\w+|perf_\w+|__perf_\w+",
+    r"_?printk\w*|vprintk\w*|__warn_printk|__WARN_printf|dump_stack\w*",
+    r"__asan_\w+|__kasan_\w+|kasan_\w+|__kcsan_\w+|kcsan_\w+|__ubsan_\w+|__sanitizer_\w+|__kmsan_\w+",
+    r"__might_sleep|__might_resched|__cant_sleep|__cant_migrate|might_fault",
+)
+
+# Files whose functions are expanded; anything else is recorded as a boundary node.
+DEFAULT_EXPAND = ("kernel/sched/ext*.c", "kernel/sched/ext*.h", "kernel/sched/sched.h", "include/linux/sched/ext.h")
+DEFAULT_MAX_DEPTH = 12
+
+
+@dataclass
+class Limits:
+    """B4: how far to follow the graph."""
+    max_depth: int = DEFAULT_MAX_DEPTH
+    stop: tuple[str, ...] = DEFAULT_STOP
+    expand: tuple[str, ...] = DEFAULT_EXPAND
+
+    def __post_init__(self) -> None:
+        if self.max_depth < 0:
+            raise ValueError("max depth must be >= 0")
+        self._stop = re.compile("|".join(f"(?:{p})" for p in self.stop)) if self.stop else None
+
+    def stopped(self, name: str) -> bool:
+        return bool(self._stop and self._stop.fullmatch(name))
+
+    def expandable(self, file: str | None) -> bool:
+        return file is not None and any(fnmatch(file, pattern) for pattern in self.expand)
 
 
 @dataclass
@@ -149,19 +187,31 @@ class Program:
             self.facts(ctx.owner).add_site("<indirect>", "indirect", ctx.line)
 
     # -- graph ----------------------------------------------------------------
-    def node_kind(self, facts: NodeFacts, kfuncs: set[str]) -> str:
-        if facts.name in kfuncs:
+    def node_kind(self, facts: NodeFacts, kfuncs: set[str], expanded: bool) -> str:
+        if facts.name in kfuncs and expanded:
             return "kfunc"
-        if facts.defined or facts.inlined:
-            return "internal"
-        return "external"
+        if not (facts.defined or facts.inlined):
+            return "external"
+        return "internal" if expanded else "boundary"
 
     def callees(self, facts: NodeFacts) -> list[Site]:
         return sorted(facts.sites.values(), key=lambda s: (s.line, s.target, s.kind))
 
-    def reachable(self, roots: list[str]) -> dict[str, int]:
-        """Shortest call depth of every node reachable from the roots."""
+    def expanded(self, name: str, depth: int, roots: set[str], limits: Limits) -> bool:
+        """Whether a reachable node's own callees are followed."""
+        facts = self.nodes[name]
+        if not (facts.defined or facts.inlined):
+            return False                      # external: nothing to expand
+        if name in roots:
+            return True
+        if depth >= limits.max_depth:
+            return False
+        return limits.expandable(facts.sub.file if facts.sub else None)
+
+    def reachable(self, roots: list[str], limits: Limits) -> tuple[dict[str, int], set[str]]:
+        """Shortest depth of every recorded node, and the set of expanded nodes."""
         depth: dict[str, int] = {}
+        expanded: set[str] = set()
         queue = deque()
         for root in roots:
             if root in self.nodes and root not in depth:
@@ -169,14 +219,19 @@ class Program:
                 queue.append(root)
         while queue:
             name = queue.popleft()
+            if not self.expanded(name, depth[name], set(roots), limits):
+                continue
+            expanded.add(name)
             for site in self.callees(self.nodes[name]):
                 if site.kind != "direct" or site.target in depth or site.target not in self.nodes:
                     continue
+                if limits.stopped(site.target):
+                    continue
                 depth[site.target] = depth[name] + 1
                 queue.append(site.target)
-        return depth
+        return depth, expanded
 
-    def node_json(self, facts: NodeFacts, kind: str, depth: int) -> dict:
+    def node_json(self, facts: NodeFacts, kind: str, depth: int, limits: Limits) -> dict:
         out: dict = {"kind": kind}
         sub = facts.sub
         if sub is not None and sub.file != "?":
@@ -187,21 +242,24 @@ class Program:
                 if end:
                     out["end_line"] = end
         out["depth"] = depth
-        out["callees"] = [{"target": s.target, "kind": s.kind, "line": s.line} for s in self.callees(facts)
-                          if s.line > 0] + [{"target": s.target, "kind": s.kind}
-                                            for s in self.callees(facts) if s.line <= 0]
+        sites = [] if kind in ("boundary", "external") else \
+            [s for s in self.callees(facts) if not (s.kind == "direct" and limits.stopped(s.target))]
+        out["callees"] = [{"target": s.target, "kind": s.kind, "line": s.line} if s.line > 0
+                          else {"target": s.target, "kind": s.kind} for s in sites]
         return out
 
     def to_json(self, roots: list[str], kfuncs: set[str], kernel_version: str,
-                kernel_commit: str | None) -> dict:
+                kernel_commit: str | None, limits: Limits | None = None) -> dict:
+        limits = limits or Limits()
         missing = [r for r in roots if r not in self.nodes]
         if missing:
             raise ValueError("roots not found in the IR: " + ", ".join(missing))
-        depth = self.reachable(roots)
+        depth, expanded = self.reachable(roots, limits)
         nodes = {}
         for name in sorted(depth):
             facts = self.nodes[name]
-            nodes[name] = self.node_json(facts, self.node_kind(facts, kfuncs), depth[name])
+            kind = self.node_kind(facts, kfuncs, name in expanded)
+            nodes[name] = self.node_json(facts, kind, depth[name], limits)
         graph = {"kernel_version": kernel_version}
         if kernel_commit:
             graph["kernel_commit"] = kernel_commit

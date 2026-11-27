@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-from .graph import Program, read_kfuncs
+from .graph import DEFAULT_EXPAND, DEFAULT_MAX_DEPTH, Limits, Program, read_kfuncs
 from .ir import btf_kfunc_sets, parse_module
 
 REPO = Path(__file__).resolve().parents[2]
@@ -82,6 +82,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--kernel", type=Path, help="kernel source tree (default: inferred from the IR debug info)")
     p.add_argument("--roots", help="kfuncs.csv path or comma-separated kfunc names "
                                    "(default catalog/kfuncs.csv, else every kfunc in the IR's BTF sets)")
+    p.add_argument("--depth", type=int, default=DEFAULT_MAX_DEPTH,
+                   help=f"maximum call depth; nodes at this depth are boundary nodes (default {DEFAULT_MAX_DEPTH})")
+    p.add_argument("--expand", action="append", metavar="GLOB",
+                   help="also expand functions defined in files matching GLOB, e.g. kernel/sched/core.c "
+                        f"(always expanded: {', '.join(DEFAULT_EXPAND)}); others are boundary nodes")
+    p.add_argument("--stop", action="append", metavar="REGEX",
+                   help="leave out calls to functions whose name fully matches REGEX (adds to the built-in stop-list)")
+    p.add_argument("--no-default-stop", action="store_true", help="do not apply the built-in stop-list")
     p.add_argument("-o", "--output", type=Path, help="write JSON here (default stdout)")
     return p
 
@@ -97,7 +105,10 @@ def run(args: argparse.Namespace) -> dict:
     program = Program(modules, kernel)
     program.collect()
     manifest = read_manifest(args.build_dir)
-    return program.to_json(roots, kfuncs, pinned_version(), manifest.get("kernel_commit"))
+    limits = Limits(args.depth,
+                    (() if args.no_default_stop else Limits().stop) + tuple(args.stop or ()),
+                    DEFAULT_EXPAND + tuple(args.expand or ()))
+    return program.to_json(roots, kfuncs, pinned_version(), manifest.get("kernel_commit"), limits)
 
 
 def main(argv: list[str] | None = None) -> int:

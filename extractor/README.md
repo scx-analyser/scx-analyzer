@@ -66,6 +66,17 @@ python3 -m extractor --roots catalog/kfuncs.csv --kernel ~/linux
   `_raw_spin_lock`, `irq_work_queue`). Calls through function pointers are kept as `indirect` edges.
 - **Depth** is the shortest call distance from any root.
 
+### Depth limit, stop-list and boundary (B4)
+
+| Option | Default | Effect |
+|---|---|---|
+| `--depth N` | 12 | nodes at depth N are recorded as `boundary` and not expanded |
+| `--expand GLOB` | `kernel/sched/ext*.c`, `kernel/sched/ext*.h`, `kernel/sched/sched.h`, `include/linux/sched/ext.h` | functions defined elsewhere (e.g. `kernel/sched/core.c`, generic headers) are `boundary` nodes: file and line recorded, callees not followed. Repeat to add files, e.g. `--expand kernel/sched/core.c` |
+| `--stop REGEX` | lockdep bookkeeping (`lock_acquire`, `lockdep_*` except asserts), RCU read-side bookkeeping, tracepoints (`__SCT__*`, `trace_*`), printk, sanitizers, `__might_sleep` | calls to these are left out entirely (no node, no edge): they do not touch the tracked scheduler state. `--no-default-stop` keeps them |
+
+Roots are always expanded. With the defaults, v7.1 gives 267 nodes (59 kfuncs, 96 internal, 83 boundary,
+29 external, maximum depth 5); `--expand kernel/sched/core.c` gives 291.
+
 The kernel tree is inferred from the IR's debug info (pass `--kernel` if it moved); it is needed for `end_line`.
 
 Notes:
