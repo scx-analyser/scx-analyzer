@@ -42,6 +42,32 @@ inlined. Their call sites survive as `inlinedAt` debug locations, which the extr
 `extractor/kernel.config` mirrors Epic D's `validation/vm/config` (sched_ext, BTF, lockdep) plus
 `CONFIG_SCHED_CORE`, so the call graph and the test VM describe the same options.
 
+## Extracting the call graph (B3)
+
+```sh
+python3 -m extractor -o extractor/out/v7.1.callgraph.json          # reads extractor/build/kernel/sched/*.ll
+python3 -m extractor --roots scx_bpf_kick_cpu,scx_bpf_dsq_insert     # only some roots
+python3 -m extractor --roots catalog/kfuncs.csv --kernel ~/linux
+```
+
+`extractor/scxa_extract/` reads the textual IR directly (Python, no LLVM bindings):
+
+- **Roots.** `catalog/kfuncs.csv` if present, else every kfunc registered in an `scx_kfunc_ids_*` BTF set, read
+  from the `__BTF_ID__` entries the IR carries (59 for v7.1, the same as the A1 inventory). Every kfunc found in
+  the BTF sets gets `kind: kfunc`, root or not.
+- **Nodes** are kernel functions named by their DWARF name (optimizer suffixes such as `.constprop.0` are mapped
+  back). `file`/`line` come from the `DISubprogram`, `end_line` from the closing brace in the source tree
+  (omitted for macro-generated functions such as tracepoints).
+- **Inlining.** At `-O2` most static helpers have no body of their own. Every instruction's `DILocation`
+  `inlinedAt` chain says which function's code it is and where that function was inlined, so each inline
+  expansion becomes a `direct` edge at the call-site line, and the inlined code is attributed to the helper.
+  All copies of a function (several inline expansions, out-of-line bodies in both modules) merge into one node.
+- **Kinds.** `kfunc`; `internal` (has code in the IR, out of line or inlined); `external` (only declared, e.g.
+  `_raw_spin_lock`, `irq_work_queue`). Calls through function pointers are kept as `indirect` edges.
+- **Depth** is the shortest call distance from any root.
+
+The kernel tree is inferred from the IR's debug info (pass `--kernel` if it moved); it is needed for `end_line`.
+
 Notes:
 - Inlined helpers: use debug-info `inlinedAt` or build analysis IR with `-fno-inline`.
 - Indirect calls (`SCX_CALL_OP*`, `sched_class` methods) must appear as `kind: indirect`, never dropped.

@@ -1,3 +1,4 @@
 /.dist/
 /checker/**/__pycache__/
 /extractor/build/
+__pycache__/
