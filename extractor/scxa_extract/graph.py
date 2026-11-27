@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .debuginfo import DebugInfo, Frame, Source, Subprogram
+from .fields import FieldResolver
 from .ir import Function, Instruction, Module, call_target
 
 GENERATOR = "scxa-extract 0.1"
@@ -35,6 +36,16 @@ DEFAULT_STOP = (
     r"__asan_\w+|__kasan_\w+|kasan_\w+|__kcsan_\w+|kcsan_\w+|__ubsan_\w+|__sanitizer_\w+|__kmsan_\w+",
     r"__might_sleep|__might_resched|__cant_sleep|__cant_migrate|might_fault",
 )
+
+# Generic library code (include/, arch/): when inlined, its instructions are
+# attributed to the calling function at the call-site line, so e.g. the stores of an
+# inlined list_add() are writes of the caller.
+LIBRARY_PREFIXES = ("include/", "arch/")
+
+
+def is_library(sub: Subprogram) -> bool:
+    return sub.file.startswith(LIBRARY_PREFIXES) and not sub.file.startswith("include/linux/sched/ext.h")
+
 
 # Files whose functions are expanded; anything else is recorded as a boundary node.
 DEFAULT_EXPAND = ("kernel/sched/ext*.c", "kernel/sched/ext*.h", "kernel/sched/sched.h", "include/linux/sched/ext.h")
@@ -76,6 +87,8 @@ class NodeFacts:
     inlined: bool = False          # code of it appears inlined somewhere
     declared: bool = False         # only known from a declaration / call
     sites: dict[tuple[str, str, int], Site] = field(default_factory=dict)
+    reads: set[str] = field(default_factory=set)
+    writes: set[str] = field(default_factory=set)
 
     def add_site(self, target: str, kind: str, line: int) -> None:
         self.sites.setdefault((target, kind, line), Site(target, kind, line))
@@ -91,9 +104,11 @@ class Context:
 
 
 class Program:
-    def __init__(self, modules: list[Module], kernel_root: Path | None):
+    def __init__(self, modules: list[Module], kernel_root: Path | None, collapse_library: bool = True):
         self.modules = modules
+        self.collapse_library = collapse_library
         self.debug = {id(m): DebugInfo(m, kernel_root) for m in modules}
+        self.fields = {id(m): FieldResolver(m) for m in modules}
         self.source = Source(kernel_root)
         self.nodes: dict[str, NodeFacts] = {}
         self._key_of_sub: dict[tuple[str, str, int], str] = {}
@@ -123,9 +138,14 @@ class Program:
 
     # -- per-instruction attribution ---------------------------------------------
     def owner_index(self, frames: tuple[Frame, ...]) -> int:
-        """Index of the frame an instruction is attributed to. Later stages
-        collapse library helpers into their callers; here it is the innermost."""
-        return 0
+        """Index of the frame an instruction is attributed to: the innermost frame
+        that is not inlined generic library code (the physical function at worst)."""
+        if not self.collapse_library:
+            return 0
+        for i, frame in enumerate(frames[:-1]):
+            if not is_library(frame.sub):
+                return i
+        return len(frames) - 1
 
     def context(self, di: DebugInfo, inst: Instruction, fn_key: str) -> Context:
         frames = di.frames(inst.dbg)
@@ -159,6 +179,7 @@ class Program:
         sub = di.subprogram(fn.dbg)
         fn_key = self.key_for(sub) if sub else fn.name
         self.facts(fn_key).defined = True
+        self.fields[id(module)].start_function(fn)
         for inst in fn.instructions:
             ctx = self.context(di, inst, fn_key)
             self.add_inline_edges(ctx)
@@ -175,6 +196,14 @@ class Program:
 
     def visit_instruction(self, module: Module, di: DebugInfo, fn: Function,
                           inst: Instruction, ctx: Context) -> None:
+        access = self.fields[id(module)].access(inst)
+        if access is not None:
+            kind, ref, _ = access
+            facts = self.facts(ctx.owner)
+            if kind in ("read", "rmw"):
+                facts.reads.add(ref)
+            if kind in ("write", "rmw"):
+                facts.writes.add(ref)
         target = call_target(inst)
         if target is None:
             return
@@ -242,6 +271,11 @@ class Program:
                 if end:
                     out["end_line"] = end
         out["depth"] = depth
+        if kind not in ("boundary", "external"):
+            if facts.reads:
+                out["reads"] = sorted(facts.reads)
+            if facts.writes:
+                out["writes"] = sorted(facts.writes)
         sites = [] if kind in ("boundary", "external") else \
             [s for s in self.callees(facts) if not (s.kind == "direct" and limits.stopped(s.target))]
         out["callees"] = [{"target": s.target, "kind": s.kind, "line": s.line} if s.line > 0
