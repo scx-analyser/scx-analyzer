@@ -1,86 +1,233 @@
 {
   "kernel_version": "TBD (see KERNEL_VERSION)",
+  "kernel_commit": "8cd9520d35a6c38db6567e97dd93b1f11f185dc6",
   "generator": "hand-written",
   "illustrative": true,
-  "roots": ["scx_bpf_dsq_insert", "scx_bpf_kick_cpu"],
+  "roots": ["scx_bpf_dsq_insert", "scx_bpf_dsq_move_to_local", "scx_bpf_kick_cpu"],
   "nodes": {
     "scx_bpf_dsq_insert": {
-      "kind": "kfunc",
-      "file": "kernel/sched/ext.c",
-      "depth": 0,
+      "kind": "kfunc", "file": "kernel/sched/ext.c", "line": 8220, "end_line": 8225, "depth": 0,
+      "events": [
+        {"kind": "call", "target": "scx_bpf_dsq_insert___v2", "line": 8224}
+      ],
+      "callees": [{"target": "scx_bpf_dsq_insert___v2", "kind": "direct", "line": 8224}]
+    },
+    "scx_bpf_dsq_insert___v2": {
+      "kind": "kfunc", "file": "kernel/sched/ext.c", "line": 8193, "end_line": 8215, "depth": 1,
+      "reads": ["task_struct.scx.slice"],
       "writes": ["task_struct.scx.slice"],
       "events": [
-        {"kind": "call", "target": "scx_dsq_insert_preamble"},
-        {"kind": "guard", "cond": "!scx_dsq_insert_preamble(p, enq_flags)", "action": "return"},
-        {"kind": "write", "field": "task_struct.scx.slice", "op": "set"},
-        {"kind": "call", "target": "scx_dsq_insert_commit"}
+        {"kind": "call", "target": "scx_prog_sched", "line": 8200},
+        {"kind": "guard", "cond": "unlikely(!sch)", "action": "return", "line": 8201},
+        {"kind": "call", "target": "scx_dsq_insert_preamble", "line": 8204},
+        {"kind": "guard", "cond": "!scx_dsq_insert_preamble(sch, p, dsq_id, &enq_flags)", "action": "return", "line": 8204},
+        {"kind": "write", "field": "task_struct.scx.slice", "op": "set", "expr": "p", "cond": "slice", "line": 8208},
+        {"kind": "write", "field": "task_struct.scx.slice", "op": "set", "expr": "p", "cond": "!slice", "line": 8210},
+        {"kind": "call", "target": "scx_dsq_insert_commit", "line": 8212}
       ],
       "callees": [
-        {"target": "scx_dsq_insert_preamble", "kind": "direct"},
-        {"target": "scx_dsq_insert_commit", "kind": "direct"}
+        {"target": "scx_prog_sched", "kind": "direct", "line": 8200},
+        {"target": "scx_dsq_insert_preamble", "kind": "direct", "line": 8204},
+        {"target": "scx_dsq_insert_commit", "kind": "direct", "line": 8212}
       ]
     },
     "scx_dsq_insert_preamble": {
-      "kind": "internal",
-      "file": "kernel/sched/ext.c",
-      "depth": 1,
-      "reads": ["task_struct.scx.kf_mask"],
+      "kind": "internal", "file": "kernel/sched/ext.c", "line": 8099, "end_line": 8124, "depth": 2,
       "events": [
-        {"kind": "guard", "cond": "!scx_kf_allowed(SCX_KF_ENQUEUE | SCX_KF_DISPATCH)", "action": "error"},
-        {"kind": "guard", "cond": "!p", "action": "error", "msg": "called with NULL task"},
-        {"kind": "guard", "cond": "enq_flags & INTERNAL_FLAGS", "action": "error", "msg": "invalid enq_flags"}
+        {"kind": "assert_held", "lock": "irqs_disabled", "expr": "lockdep_assert_irqs_disabled()", "line": 8102},
+        {"kind": "guard", "cond": "unlikely(!p)", "action": "error", "msg": "called with NULL task", "line": 8104},
+        {"kind": "guard", "cond": "unlikely(*enq_flags & __SCX_ENQ_INTERNAL_MASK)", "action": "error", "msg": "invalid enq_flags 0x%llx", "line": 8109},
+        {"kind": "call", "target": "scx_task_on_sched", "line": 8115},
+        {"kind": "guard", "cond": "unlikely(!scx_task_on_sched(sch, p))", "action": "return", "line": 8115},
+        {"kind": "call", "target": "scx_vet_enq_flags", "line": 8120},
+        {"kind": "guard", "cond": "!scx_vet_enq_flags(sch, dsq_id, enq_flags)", "action": "return", "line": 8120}
       ],
-      "callees": [{"target": "scx_kf_allowed", "kind": "direct"}]
+      "callees": [
+        {"target": "scx_task_on_sched", "kind": "direct", "line": 8115},
+        {"target": "scx_vet_enq_flags", "kind": "direct", "line": 8120}
+      ]
     },
-    "scx_kf_allowed": {
-      "kind": "internal",
-      "file": "kernel/sched/ext.c",
-      "depth": 2,
-      "reads": ["task_struct.scx.kf_mask"],
-      "events": [{"kind": "error", "msg": "kfunc called from disallowed context"}],
+    "scx_vet_enq_flags": {
+      "kind": "internal", "file": "kernel/sched/ext.c", "line": 8082, "end_line": 8097, "depth": 3,
+      "events": [
+        {"kind": "guard", "cond": "unlikely(!is_local)", "action": "error", "msg": "SCX_ENQ_IMMED on a non-local DSQ 0x%llx", "line": 8088}
+      ],
       "callees": []
     },
     "scx_dsq_insert_commit": {
-      "kind": "internal",
-      "file": "kernel/sched/ext.c",
-      "depth": 1,
+      "kind": "internal", "file": "kernel/sched/ext.c", "line": 8126, "end_line": 8149, "depth": 2,
       "reads": ["task_struct.scx.ops_state"],
       "events": [
-        {"kind": "guard", "cond": "direct_dispatch_task == p", "action": "continue"},
-        {"kind": "call", "target": "mark_direct_dispatch"},
-        {"kind": "guard", "cond": "dspc->cursor >= dispatch_max_batch", "action": "error", "msg": "dispatch buffer overflow"}
+        {"kind": "call", "target": "mark_direct_dispatch", "cond": "ddsp_task", "line": 8134},
+        {"kind": "guard", "cond": "ddsp_task", "action": "return", "line": 8133},
+        {"kind": "guard", "cond": "unlikely(dspc->cursor >= sch->dsp_max_batch)", "action": "error", "msg": "dispatch buffer overflow", "line": 8138},
+        {"kind": "atomic", "field": "task_struct.scx.ops_state", "op": "read", "expr": "p", "line": 8145}
       ],
-      "callees": [{"target": "mark_direct_dispatch", "kind": "direct"}]
+      "callees": [{"target": "mark_direct_dispatch", "kind": "direct", "line": 8134}]
     },
     "mark_direct_dispatch": {
-      "kind": "internal",
-      "file": "kernel/sched/ext.c",
-      "depth": 2,
+      "kind": "internal", "file": "kernel/sched/ext.c", "line": 1766, "end_line": 1795, "depth": 3,
+      "reads": ["task_struct.scx.ddsp_dsq_id", "task_struct.scx.ddsp_enq_flags"],
       "writes": ["task_struct.scx.ddsp_dsq_id", "task_struct.scx.ddsp_enq_flags"],
       "events": [
-        {"kind": "assert_held", "lock": "rq"},
-        {"kind": "write", "field": "task_struct.scx.ddsp_dsq_id", "op": "set"}
+        {"kind": "guard", "cond": "unlikely(p != ddsp_task)", "action": "error", "msg": "trying to direct-dispatch a task other than the one being enqueued", "line": 1779},
+        {"kind": "warn", "msg": "p->scx.ddsp_dsq_id != SCX_DSQ_INVALID", "line": 1790},
+        {"kind": "warn", "msg": "p->scx.ddsp_enq_flags", "line": 1791},
+        {"kind": "write", "field": "task_struct.scx.ddsp_dsq_id", "op": "set", "expr": "p", "line": 1793},
+        {"kind": "write", "field": "task_struct.scx.ddsp_enq_flags", "op": "set", "expr": "p", "line": 1794}
       ],
       "callees": []
     },
-    "scx_bpf_kick_cpu": {
-      "kind": "kfunc",
-      "file": "kernel/sched/ext.c",
-      "depth": 0,
+    "scx_bpf_dsq_move_to_local": {
+      "kind": "kfunc", "file": "kernel/sched/ext.c", "line": 8555, "end_line": 8558, "depth": 0,
       "events": [
-        {"kind": "guard", "cond": "!ops_cpu_valid(cpu, NULL)", "action": "return"},
-        {"kind": "lock", "lock": "rq"},
-        {"kind": "write", "field": "rq.scx.flags", "op": "set"},
-        {"kind": "unlock", "lock": "rq"},
-        {"kind": "call", "target": "irq_work_queue"}
+        {"kind": "call", "target": "scx_bpf_dsq_move_to_local___v2", "line": 8557}
       ],
-      "writes": ["rq.scx.flags"],
+      "callees": [{"target": "scx_bpf_dsq_move_to_local___v2", "kind": "direct", "line": 8557}]
+    },
+    "scx_bpf_dsq_move_to_local___v2": {
+      "kind": "kfunc", "file": "kernel/sched/ext.c", "line": 8512, "end_line": 8550, "depth": 1,
+      "events": [
+        {"kind": "call", "target": "scx_prog_sched", "line": 8521},
+        {"kind": "guard", "cond": "unlikely(!sch)", "action": "return", "line": 8522},
+        {"kind": "call", "target": "scx_vet_enq_flags", "line": 8525},
+        {"kind": "guard", "cond": "!scx_vet_enq_flags(sch, SCX_DSQ_LOCAL, &enq_flags)", "action": "return", "line": 8525},
+        {"kind": "call", "target": "flush_dispatch_buf", "line": 8530},
+        {"kind": "call", "target": "find_user_dsq", "line": 8532},
+        {"kind": "guard", "cond": "unlikely(!dsq)", "action": "error", "msg": "invalid DSQ ID 0x%016llx", "line": 8533},
+        {"kind": "call", "target": "consume_dispatch_q", "line": 8538}
+      ],
       "callees": [
-        {"target": "ops_cpu_valid", "kind": "direct"},
-        {"target": "irq_work_queue", "kind": "direct"}
+        {"target": "scx_prog_sched", "kind": "direct", "line": 8521},
+        {"target": "scx_vet_enq_flags", "kind": "direct", "line": 8525},
+        {"target": "flush_dispatch_buf", "kind": "direct", "line": 8530},
+        {"target": "find_user_dsq", "kind": "direct", "line": 8532},
+        {"target": "consume_dispatch_q", "kind": "direct", "line": 8538}
       ]
     },
-    "ops_cpu_valid": {"kind": "internal", "file": "kernel/sched/ext.c", "depth": 1, "events": [{"kind": "error", "msg": "invalid CPU"}], "callees": []},
-    "irq_work_queue": {"kind": "boundary", "file": "kernel/irq_work.c", "depth": 1, "callees": []}
+    "consume_dispatch_q": {
+      "kind": "internal", "file": "kernel/sched/ext.c", "line": 2512, "end_line": 2557, "depth": 2,
+      "events": [
+        {"kind": "guard", "cond": "list_empty(&dsq->list)", "action": "return", "line": 2522},
+        {"kind": "lock", "lock": "dsq", "expr": "&dsq->lock", "line": 2525},
+        {"kind": "guard", "cond": "unlikely(READ_ONCE(sch->aborting)) && dsq->id != SCX_DSQ_BYPASS", "action": "continue", "line": 2538},
+        {"kind": "call", "target": "task_unlink_from_dsq", "cond": "rq == task_rq", "line": 2542},
+        {"kind": "call", "target": "move_local_task_to_local_dsq", "cond": "rq == task_rq", "line": 2543},
+        {"kind": "unlock", "lock": "dsq", "expr": "&dsq->lock", "cond": "rq == task_rq", "line": 2544},
+        {"kind": "guard", "cond": "rq == task_rq", "action": "return", "line": 2541},
+        {"kind": "call", "target": "task_can_run_on_remote_rq", "line": 2548},
+        {"kind": "call", "target": "consume_remote_task", "cond": "task_can_run_on_remote_rq(sch, p, rq, false)", "line": 2549},
+        {"kind": "unlock", "lock": "dsq", "expr": "&dsq->lock", "line": 2555}
+      ],
+      "callees": [
+        {"target": "task_unlink_from_dsq", "kind": "direct", "line": 2542},
+        {"target": "move_local_task_to_local_dsq", "kind": "direct", "line": 2543},
+        {"target": "task_can_run_on_remote_rq", "kind": "direct", "line": 2548},
+        {"target": "consume_remote_task", "kind": "direct", "line": 2549}
+      ]
+    },
+    "task_unlink_from_dsq": {
+      "kind": "internal", "file": "kernel/sched/ext.c", "line": 1646, "end_line": 1666, "depth": 3,
+      "reads": ["task_struct.scx.dsq_flags", "scx_dispatch_q.id", "scx_dispatch_q.first_task"],
+      "writes": ["task_struct.scx.dsq_priq", "task_struct.scx.dsq_flags", "task_struct.scx.dsq_list.node", "scx_dispatch_q.priq", "scx_dispatch_q.list", "scx_dispatch_q.first_task"],
+      "events": [
+        {"kind": "warn", "msg": "list_empty(&p->scx.dsq_list.node)", "line": 1649},
+        {"kind": "write", "field": "scx_dispatch_q.priq", "op": "rb_erase", "expr": "dsq", "cond": "p->scx.dsq_flags & SCX_TASK_DSQ_ON_PRIQ", "line": 1652},
+        {"kind": "write", "field": "task_struct.scx.dsq_priq", "op": "rb_erase", "expr": "p", "cond": "p->scx.dsq_flags & SCX_TASK_DSQ_ON_PRIQ", "line": 1653},
+        {"kind": "write", "field": "task_struct.scx.dsq_flags", "op": "andnot", "expr": "p", "cond": "p->scx.dsq_flags & SCX_TASK_DSQ_ON_PRIQ", "line": 1654},
+        {"kind": "write", "field": "task_struct.scx.dsq_list.node", "op": "list_del", "expr": "p", "line": 1657},
+        {"kind": "write", "field": "scx_dispatch_q.list", "op": "list_del", "expr": "dsq", "line": 1657},
+        {"kind": "call", "target": "dsq_dec_nr", "line": 1658},
+        {"kind": "call", "target": "nldsq_next_task", "cond": "!(dsq->id & SCX_DSQ_FLAG_BUILTIN) && dsq->first_task == p", "line": 1663},
+        {"kind": "write", "field": "scx_dispatch_q.first_task", "op": "rcu_assign", "expr": "dsq", "cond": "!(dsq->id & SCX_DSQ_FLAG_BUILTIN) && dsq->first_task == p", "line": 1664}
+      ],
+      "callees": [
+        {"target": "dsq_dec_nr", "kind": "direct", "line": 1658},
+        {"target": "nldsq_next_task", "kind": "direct", "line": 1663}
+      ]
+    },
+    "dsq_dec_nr": {
+      "kind": "internal", "file": "kernel/sched/ext.c", "line": 1405, "end_line": 1419, "depth": 4,
+      "reads": ["scx_dispatch_q.nr", "scx_dispatch_q.id", "rq.scx.nr_immed"],
+      "writes": ["scx_dispatch_q.nr", "rq.scx.nr_immed"],
+      "events": [
+        {"kind": "write", "field": "scx_dispatch_q.nr", "op": "write_once", "expr": "dsq", "line": 1408},
+        {"kind": "warn", "msg": "dsq->id != SCX_DSQ_LOCAL", "cond": "p->scx.flags & SCX_TASK_IMMED", "line": 1413},
+        {"kind": "guard", "cond": "WARN_ON_ONCE(dsq->id != SCX_DSQ_LOCAL) || WARN_ON_ONCE(rq->scx.nr_immed <= 0)", "action": "return", "line": 1413},
+        {"kind": "write", "field": "rq.scx.nr_immed", "op": "dec", "expr": "container_of(dsq, struct rq, scx.local_dsq)", "cond": "p->scx.flags & SCX_TASK_IMMED", "line": 1417}
+      ],
+      "callees": []
+    },
+    "move_local_task_to_local_dsq": {
+      "kind": "internal", "file": "kernel/sched/ext.c", "line": 2248, "end_line": 2270, "depth": 3,
+      "reads": ["task_struct.scx.holding_cpu"],
+      "writes": ["task_struct.scx.dsq_list.node", "scx_dispatch_q.list", "task_struct.scx.dsq"],
+      "events": [
+        {"kind": "assert_held", "lock": "dsq", "expr": "&src_dsq->lock", "line": 2256},
+        {"kind": "assert_held", "lock": "rq", "expr": "dst_rq", "line": 2257},
+        {"kind": "warn", "msg": "p->scx.holding_cpu >= 0", "line": 2259},
+        {"kind": "write", "field": "task_struct.scx.dsq_list.node", "op": "list_add", "expr": "p", "line": 2262},
+        {"kind": "write", "field": "scx_dispatch_q.list", "op": "list_add", "expr": "dst_dsq", "line": 2262},
+        {"kind": "call", "target": "dsq_inc_nr", "line": 2266},
+        {"kind": "write", "field": "task_struct.scx.dsq", "op": "set", "expr": "p", "line": 2267},
+        {"kind": "call", "target": "local_dsq_post_enq", "line": 2269}
+      ],
+      "callees": [
+        {"target": "dsq_inc_nr", "kind": "direct", "line": 2266},
+        {"target": "local_dsq_post_enq", "kind": "direct", "line": 2269}
+      ]
+    },
+    "scx_bpf_kick_cpu": {
+      "kind": "kfunc", "file": "kernel/sched/ext.c", "line": 8945, "end_line": 8953, "depth": 0,
+      "events": [
+        {"kind": "call", "target": "scx_prog_sched", "line": 8950},
+        {"kind": "call", "target": "scx_kick_cpu", "cond": "likely(sch)", "line": 8952}
+      ],
+      "callees": [
+        {"target": "scx_prog_sched", "kind": "direct", "line": 8950},
+        {"target": "scx_kick_cpu", "kind": "direct", "line": 8952}
+      ]
+    },
+    "scx_kick_cpu": {
+      "kind": "internal", "file": "kernel/sched/ext.c", "line": 8881, "end_line": 8932, "depth": 1,
+      "writes": ["rq.scx.cpus_to_kick_if_idle", "rq.scx.cpus_to_kick", "rq.scx.cpus_to_preempt", "rq.scx.cpus_to_wait"],
+      "events": [
+        {"kind": "call", "target": "ops_cpu_valid", "line": 8886},
+        {"kind": "guard", "cond": "!ops_cpu_valid(sch, cpu, NULL)", "action": "return", "line": 8886},
+        {"kind": "call", "target": "scx_bypassing", "line": 8898},
+        {"kind": "guard", "cond": "scx_bypassing(sch, cpu_of(this_rq))", "action": "return", "line": 8898},
+        {"kind": "error", "msg": "PREEMPT/WAIT cannot be used with SCX_KICK_IDLE", "cond": "flags & SCX_KICK_IDLE && unlikely(flags & (SCX_KICK_PREEMPT | SCX_KICK_WAIT))", "line": 8910},
+        {"kind": "lock", "lock": "rq", "expr": "target_rq", "op": "trylock", "cond": "flags & SCX_KICK_IDLE", "line": 8912},
+        {"kind": "unlock", "lock": "rq", "expr": "target_rq", "cond": "flags & SCX_KICK_IDLE && raw_spin_rq_trylock(target_rq)", "line": 8917},
+        {"kind": "atomic", "field": "rq.scx.cpus_to_kick_if_idle", "op": "set_bit", "expr": "this_rq", "cond": "flags & SCX_KICK_IDLE", "line": 8919},
+        {"kind": "atomic", "field": "rq.scx.cpus_to_kick", "op": "set_bit", "expr": "this_rq", "cond": "!(flags & SCX_KICK_IDLE)", "line": 8921},
+        {"kind": "atomic", "field": "rq.scx.cpus_to_preempt", "op": "set_bit", "expr": "this_rq", "cond": "!(flags & SCX_KICK_IDLE) && (flags & SCX_KICK_PREEMPT)", "line": 8924},
+        {"kind": "atomic", "field": "rq.scx.cpus_to_wait", "op": "set_bit", "expr": "this_rq", "cond": "!(flags & SCX_KICK_IDLE) && (flags & SCX_KICK_WAIT)", "line": 8926},
+        {"kind": "call", "target": "irq_work_queue", "line": 8929}
+      ],
+      "callees": [
+        {"target": "ops_cpu_valid", "kind": "direct", "line": 8886},
+        {"target": "scx_bypassing", "kind": "direct", "line": 8898},
+        {"target": "irq_work_queue", "kind": "direct", "line": 8929}
+      ]
+    },
+    "ops_cpu_valid": {
+      "kind": "internal", "file": "kernel/sched/ext.c", "line": 1098, "end_line": 1106, "depth": 2,
+      "events": [
+        {"kind": "error", "msg": "invalid CPU %d%s%s", "cond": "!__cpu_valid(cpu)", "line": 1103}
+      ],
+      "callees": []
+    },
+    "scx_prog_sched": {"kind": "boundary", "file": "kernel/sched/ext_internal.h", "line": 1433, "end_line": 1459, "depth": 1, "callees": []},
+    "scx_task_on_sched": {"kind": "boundary", "file": "kernel/sched/ext_internal.h", "line": 1419, "end_line": 1423, "depth": 3, "callees": []},
+    "scx_bypassing": {"kind": "boundary", "file": "kernel/sched/ext_internal.h", "line": 1380, "end_line": 1384, "depth": 2, "callees": []},
+    "flush_dispatch_buf": {"kind": "boundary", "file": "kernel/sched/ext.c", "line": 2749, "end_line": 2763, "depth": 2, "callees": []},
+    "find_user_dsq": {"kind": "boundary", "file": "kernel/sched/ext.c", "line": 335, "end_line": 338, "depth": 2, "callees": []},
+    "task_can_run_on_remote_rq": {"kind": "boundary", "file": "kernel/sched/ext.c", "line": 2328, "end_line": 2375, "depth": 3, "callees": []},
+    "consume_remote_task": {"kind": "boundary", "file": "kernel/sched/ext.c", "line": 2426, "end_line": 2440, "depth": 3, "callees": []},
+    "nldsq_next_task": {"kind": "boundary", "file": "kernel/sched/ext.c", "line": 582, "end_line": 610, "depth": 4, "callees": []},
+    "dsq_inc_nr": {"kind": "boundary", "file": "kernel/sched/ext.c", "line": 1367, "end_line": 1403, "depth": 4, "callees": []},
+    "local_dsq_post_enq": {"kind": "boundary", "file": "kernel/sched/ext.c", "line": 1458, "end_line": 1516, "depth": 4, "callees": []},
+    "irq_work_queue": {"kind": "external", "file": "kernel/irq_work.c", "line": 116, "end_line": 128, "depth": 2, "callees": []}
   }
 }
