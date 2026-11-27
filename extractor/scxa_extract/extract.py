@@ -79,7 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="output directory of build_kernel_ir.sh (default extractor/build)")
     p.add_argument("--ir", type=Path, action="append",
                    help="IR file to read (repeatable; default: build_policy.ll and core.ll in --build-dir)")
-    p.add_argument("--kernel", type=Path, help="kernel source tree (default: inferred from the IR debug info)")
+    p.add_argument("--kernel", type=Path, help="kernel source tree (default: inferred from the IR debug info); "
+                                              "with `scxa extract`, the IR is built from it if missing")
     p.add_argument("--roots", help="kfuncs.csv path or comma-separated kfunc names "
                                    "(default catalog/kfuncs.csv, else every kfunc in the IR's BTF sets)")
     p.add_argument("--depth", type=int, default=DEFAULT_MAX_DEPTH,
@@ -111,18 +112,16 @@ def run(args: argparse.Namespace) -> dict:
     return program.to_json(roots, kfuncs, pinned_version(), manifest.get("kernel_commit"), limits)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    try:
-        graph = run(args)
-    except (OSError, ValueError) as exc:
-        print(f"scxa extract: {exc}", file=sys.stderr)
-        return 2
-    text = json.dumps(graph, indent=1, sort_keys=False) + "\n"
-    if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(text, encoding="utf-8")
-        print(f"wrote {len(graph['nodes'])} nodes for {len(graph['roots'])} roots to {args.output}", file=sys.stderr)
+def write(graph: dict, output: Path | None) -> None:
+    text = json.dumps(graph, indent=1) + "\n"
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf-8")
+        print(f"wrote {len(graph['nodes'])} nodes for {len(graph['roots'])} roots to {output}", file=sys.stderr)
     else:
         sys.stdout.write(text)
-    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    from .cli import cmd_extract
+    return cmd_extract(sys.argv[1:] if argv is None else argv)
