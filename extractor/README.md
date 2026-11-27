@@ -99,6 +99,31 @@ The kernel tree is inferred from the IR's debug info (pass `--kernel` if it move
 Limits: accesses through pointers whose type cannot be recovered (e.g. a list neighbour loaded from `node.next`,
 or a pointer chosen by a `phi`) are not attributed, and functions that are only `external` have no sets.
 
+### Ordered events (B6)
+
+Each expanded node gets `events` in source order (line, column, IR position); this is the order of straight-line
+code, not a control-flow graph. Encoding (see the descriptions in `contracts/callgraph.schema.json`):
+
+| Event | Produced from | Fields |
+|---|---|---|
+| `lock` / `unlock` | calls to `_raw_spin_{lock,unlock}*`, `raw_spin_rq_{lock_nested,trylock,unlock}`, `_task_rq_lock` (pi_lock + rq), `task_rq_unlock`, `double_rq_{lock,unlock}`, `mutex_*`, `percpu_{down,up}_*` | `lock` token (`rq`, `dsq`, `pi_lock`, global name), `expr` = the argument in the source (`&dsq->lock`, `target_rq`), `op: trylock` |
+| `assert_held` / `assert_not_held` | `lock_is_held_type()` (polarity from the compared constant), `lockdep_assert_irqs_{disabled,enabled}()` | `lock`, `expr`; the WARN on the same line is folded into the assertion |
+| `error` | `scx_exit()`/`scx_vexit()` with an `SCX_EXIT_ERROR*` kind, i.e. `scx_error()` | `msg` = the format string |
+| `warn` | x86 `ud2` + `__bug_table` asm (`WARN_ON*`, `BUG*`) | `msg` = the WARN condition |
+| `guard` | a conditional branch on a source line `if (cond)` whose branch ends in `return` (`action: return`, or `error` if it also calls `scx_error`/WARN), `goto`/`break`/`continue` (`continue`), or a single assignment without `else` (`fallback`) | `cond` = source condition; also found on the caller line when the branch is in inlined callee code (`if (!ops_cpu_valid(...)) return;`) |
+| `write` | stores to tracked fields | `field`, `op` (`set`, `write_once`, `list_add`, `list_del`, `rb_*`, `set_bit` for non-atomic bit ops) |
+| `atomic` | accesses inside inlined `atomic*_*`, `*_bit`, `cpumask_*_cpu`, `*cmpxchg*`, `*xchg*`, lock-prefixed asm | `field`, `op` (`read`, `read_acquire`, `set`, `set_release`, `cmpxchg`, `set_bit`, ...) |
+| `call` | one per callee (direct, inline expansion, indirect) | `target` |
+
+Lock, lockdep-assertion and `scx_exit` calls are events, not callees; the inline wrappers around them in
+`kernel/sched/sched.h` (`rq_lock*`, `lockdep_assert_rq_held`, `class_*lock*` guards, ...) are folded into their
+caller like library code. Copies of an event from several inline expansions are merged. Stores the optimizer
+merged into a line-0 location are placed on the source lines that assign the field.
+
+Not modelled: `cond` on non-guard events (which branch an event is in), loops, and conditions computed by
+`switch` statements. Every `writes` entry has a `write`/`atomic` event and every callee a `call` event.
+On v7.1: 188 guards, 25 locks, 33 unlocks, 29 assertions, 44 errors, 35 warns, 84 writes, 15 atomics.
+
 Notes:
 - Inlined helpers: use debug-info `inlinedAt` or build analysis IR with `-fno-inline`.
 - Indirect calls (`SCX_CALL_OP*`, `sched_class` methods) must appear as `kind: indirect`, never dropped.

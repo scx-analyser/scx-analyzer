@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .debuginfo import DebugInfo, Frame, Source, Subprogram
+from .events import PRIMITIVE_FRAME, Event, EventExtractor, guard_at, write_lines
 from .fields import FieldResolver
 from .ir import Function, Instruction, Module, call_target
 
@@ -45,6 +46,11 @@ LIBRARY_PREFIXES = ("include/", "arch/")
 
 def is_library(sub: Subprogram) -> bool:
     return sub.file.startswith(LIBRARY_PREFIXES) and not sub.file.startswith("include/linux/sched/ext.h")
+
+
+def is_collapsed(sub: Subprogram) -> bool:
+    """Inlined frames attributed to their caller: library code and lock/assert wrappers."""
+    return is_library(sub) or bool(PRIMITIVE_FRAME.fullmatch(sub.name))
 
 
 # Files whose functions are expanded; anything else is recorded as a boundary node.
@@ -77,6 +83,8 @@ class Site:
     target: str
     kind: str            # direct | indirect
     line: int
+    column: int = 0
+    seq: int = 0
 
 
 @dataclass
@@ -89,9 +97,26 @@ class NodeFacts:
     sites: dict[tuple[str, str, int], Site] = field(default_factory=dict)
     reads: set[str] = field(default_factory=set)
     writes: set[str] = field(default_factory=set)
+    events: dict[tuple, Event] = field(default_factory=dict)
+    unplaced: list[tuple[tuple[int, int, int], dict]] = field(default_factory=list)   # line-0 accesses
 
-    def add_site(self, target: str, kind: str, line: int) -> None:
-        self.sites.setdefault((target, kind, line), Site(target, kind, line))
+    def add_site(self, target: str, kind: str, line: int, column: int = 0, seq: int = 0) -> None:
+        site = self.sites.get((target, kind, line))
+        if site is None:
+            self.sites[(target, kind, line)] = Site(target, kind, line, column, seq)
+        elif (column, seq) < (site.column, site.seq):
+            site.column, site.seq = column, seq
+
+    def add_event(self, line: int, column: int, seq: int, data: dict) -> None:
+        """Copies of the same event (from several inline expansions) are merged,
+        keeping the earliest position."""
+        if line <= 0:
+            return
+        data = dict(data, line=line)
+        event = Event(line, column, seq, data)
+        existing = self.events.get(event.key())
+        if existing is None or (column, seq) < (existing.column, existing.seq):
+            self.events[event.key()] = event
 
 
 @dataclass
@@ -109,6 +134,9 @@ class Program:
         self.collapse_library = collapse_library
         self.debug = {id(m): DebugInfo(m, kernel_root) for m in modules}
         self.fields = {id(m): FieldResolver(m) for m in modules}
+        self.source = Source(kernel_root)
+        self.extractors = {id(m): EventExtractor(self.fields[id(m)], self.source) for m in modules}
+        self.seq = 0
         self.source = Source(kernel_root)
         self.nodes: dict[str, NodeFacts] = {}
         self._key_of_sub: dict[tuple[str, str, int], str] = {}
@@ -143,7 +171,7 @@ class Program:
         if not self.collapse_library:
             return 0
         for i, frame in enumerate(frames[:-1]):
-            if not is_library(frame.sub):
+            if not is_collapsed(frame.sub):
                 return i
         return len(frames) - 1
 
@@ -180,7 +208,9 @@ class Program:
         fn_key = self.key_for(sub) if sub else fn.name
         self.facts(fn_key).defined = True
         self.fields[id(module)].start_function(fn)
+        self.extractors[id(module)].start_function(fn)
         for inst in fn.instructions:
+            self.seq += 1
             ctx = self.context(di, inst, fn_key)
             self.add_inline_edges(ctx)
             self.visit_instruction(module, di, fn, inst, ctx)
@@ -192,28 +222,67 @@ class Program:
             caller = self.key_for(frames[i].sub)
             callee = self.key_for(frames[i - 1].sub)
             self.facts(callee).inlined = True
-            self.nodes[caller].add_site(callee, "direct", frames[i].line)
+            self.nodes[caller].add_site(callee, "direct", frames[i].line, frames[i].column, self.seq)
 
     def visit_instruction(self, module: Module, di: DebugInfo, fn: Function,
                           inst: Instruction, ctx: Context) -> None:
+        facts = self.facts(ctx.owner)
+        file = facts.sub.file if facts.sub else "?"
+        k = self.owner_index(ctx.frames) if ctx.frames else 0
+        extractor = self.extractors[id(module)]
+        at = (ctx.line, ctx.column, self.seq)
+
         access = self.fields[id(module)].access(inst)
         if access is not None:
-            kind, ref, _ = access
-            facts = self.facts(ctx.owner)
+            kind, ref, volatile = access
             if kind in ("read", "rmw"):
                 facts.reads.add(ref)
             if kind in ("write", "rmw"):
                 facts.writes.add(ref)
+            event = extractor.access_event(kind, ref, volatile, ctx.frames, k)
+            if event is not None:
+                if ctx.line > 0:
+                    facts.add_event(*at, event)
+                else:
+                    facts.unplaced.append((at, event))
+
         target = call_target(inst)
-        if target is None:
-            return
-        kind, value = target
-        if kind == "direct" and not is_intrinsic(value):
-            callee = self.resolve(module, value)
-            self.facts(callee)
-            self.facts(ctx.owner).add_site(callee, "direct", ctx.line)
-        elif kind == "indirect":
-            self.facts(ctx.owner).add_site("<indirect>", "indirect", ctx.line)
+        if target is not None:
+            kind, value = target
+            if kind == "direct" and not is_intrinsic(value):
+                callee = self.resolve(module, value)
+                events = extractor.call_events(inst, callee, ctx.frames, k, file, ctx.line)
+                if events is None:
+                    self.facts(callee)
+                    facts.add_site(callee, "direct", *at)
+                else:
+                    for event in events:
+                        facts.add_event(*at, event)
+            elif kind == "indirect":
+                facts.add_site("<indirect>", "indirect", *at)
+            elif kind == "asm":
+                for event in extractor.asm_events(inst, file, ctx.line):
+                    facts.add_event(*at, event)
+
+        if extractor.conditional_branch(inst):
+            self.add_guards(ctx, k)
+
+    def add_guards(self, ctx: Context, k: int) -> None:
+        """A conditional branch is a guard of every enclosing frame whose line is an `if`
+        whose branch leaves the normal path: the owner's own line, and the call-site
+        lines of the frames it is inlined into (`if (!ops_cpu_valid(...)) return;`
+        branches on code of the inlined callee)."""
+        levels = [(ctx.owner, ctx.line, ctx.column)]
+        for frame in ctx.frames[k + 1:]:
+            levels.append((self.key_for(frame.sub), frame.line, frame.column))
+        for owner, line, column in levels:
+            facts = self.nodes[owner]
+            if line <= 0 or facts.sub is None:
+                continue
+            guard = guard_at(self.source, facts.sub.file, line)
+            if guard is not None:
+                cond, action = guard
+                facts.add_event(line, column, self.seq, {"kind": "guard", "cond": cond, "action": action})
 
     # -- graph ----------------------------------------------------------------
     def node_kind(self, facts: NodeFacts, kfuncs: set[str], expanded: bool) -> str:
@@ -278,9 +347,45 @@ class Program:
                 out["writes"] = sorted(facts.writes)
         sites = [] if kind in ("boundary", "external") else \
             [s for s in self.callees(facts) if not (s.kind == "direct" and limits.stopped(s.target))]
+        if kind not in ("boundary", "external"):
+            out["events"] = self.events_json(facts, sites)
         out["callees"] = [{"target": s.target, "kind": s.kind, "line": s.line} if s.line > 0
                           else {"target": s.target, "kind": s.kind} for s in sites]
         return out
+
+    def place_unplaced(self, facts: NodeFacts) -> None:
+        """Stores merged by the optimizer have no line: put them on the source lines that
+        write the field, or keep one line-less event."""
+        sub = facts.sub
+        for (line, column, seq), data in facts.unplaced:
+            lines = write_lines(self.source, sub.file, sub.line, self.source.end_line(sub.file, sub.line),
+                                data["field"]) if sub else []
+            known = {e.data.get("line") for e in facts.events.values() if e.data.get("field") == data["field"]}
+            for n in lines:
+                if n not in known:
+                    facts.add_event(n, 0, seq, data)
+            if not lines and not known:
+                facts.events.setdefault(("unplaced",) + tuple(sorted(data.items())), Event(0, 0, seq, dict(data)))
+        facts.unplaced.clear()
+
+    def events_json(self, facts: NodeFacts, sites: list[Site]) -> list[dict]:
+        """Events in source order; each call site is also a call event. WARNs that
+        belong to a lockdep assertion on the same line are folded into it."""
+        self.place_unplaced(facts)
+        events = list(facts.events.values())
+        assert_lines = {e.line for e in events if e.data["kind"].startswith("assert_")}
+        events = [e for e in events if not (e.data["kind"] == "warn" and e.line in assert_lines)]
+        events += [Event(max(s.line, 0), s.column, s.seq, {"kind": "call", "target": s.target})
+                   for s in sites]
+        events.sort(key=lambda e: (e.line or 10**9, e.column, e.seq))
+        ordered = []
+        for e in events:
+            data = {"kind": e.data["kind"]}
+            data.update({k: v for k, v in e.data.items() if k not in ("kind", "line")})
+            if e.line > 0:
+                data["line"] = e.line
+            ordered.append(data)
+        return ordered
 
     def to_json(self, roots: list[str], kfuncs: set[str], kernel_version: str,
                 kernel_commit: str | None, limits: Limits | None = None) -> dict:

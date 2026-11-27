@@ -226,11 +226,16 @@ def btf_kfunc_sets(module: Module, prefix: str = "scx_kfunc_ids_") -> dict[str, 
 _CALL = re.compile(r'\bcall\b[^@%]*?(?:(@[\w.$]+|@"[^"]*")|(%[\w.$]+)|(asm)\b)\s*[("]')
 
 
+_ASM_CALL = re.compile(r'(?:tail |musttail |notail )?(?:call|callbr)\b[^"@%]*?\basm\b')
+
+
 def call_target(inst: Instruction) -> tuple[str, str] | None:
     """('direct', name) | ('indirect', %value) | ('asm', text) for call/invoke instructions."""
     if inst.opcode not in ("call", "invoke", "callbr"):
         return None
     body = inst.text.split(" = ", 1)[1] if inst.result else inst.text
+    if _ASM_CALL.match(body):
+        return "asm", body
     m = _CALL.search(body)
     if not m:
         return None
