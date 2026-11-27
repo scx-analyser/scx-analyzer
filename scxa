@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
-"""Portable CLI entry point (run from any working directory)."""
-from checker.__main__ import main
+"""Portable CLI entry point (run from any working directory).
+
+scxa extract / scxa dot  -> call-graph extractor (Epic B)
+scxa check               -> checker runner (Epic C)
+"""
+import sys
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] in ("extract", "dot"):
+        from extractor.scxa_extract.cli import main as extractor_main
+        raise SystemExit(extractor_main(sys.argv[1:]))
+    from checker.__main__ import main
     raise SystemExit(main())

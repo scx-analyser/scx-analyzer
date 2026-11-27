@@ -42,13 +42,26 @@ inlined. Their call sites survive as `inlinedAt` debug locations, which the extr
 `extractor/kernel.config` mirrors Epic D's `validation/vm/config` (sched_ext, BTF, lockdep) plus
 `CONFIG_SCHED_CORE`, so the call graph and the test VM describe the same options.
 
-## Extracting the call graph (B3)
+## Command line (B8)
 
 ```sh
-python3 -m extractor -o extractor/out/v7.1.callgraph.json          # reads extractor/build/kernel/sched/*.ll
-python3 -m extractor --roots scx_bpf_kick_cpu,scx_bpf_dsq_insert     # only some roots
-python3 -m extractor --roots catalog/kfuncs.csv --kernel ~/linux
+./scxa extract --kernel ~/linux --roots catalog/kfuncs.csv --depth 12 -o extractor/out/v7.1.callgraph.json
+./scxa extract --roots scx_bpf_kick_cpu,scx_bpf_dsq_insert            # some roots, to stdout
+./scxa dot scx_bpf_dsq_move_to_local --depth 4 -o g.dot && dot -Tsvg g.dot -o g.svg
+./scxa dot scx_bpf_kick_cpu --callgraph extractor/out/v7.1.callgraph.json --no-details
 ```
+
+`scxa extract` reads the IR in `--build-dir` (default `extractor/build/`) and, if it is missing and `--kernel` is
+given, builds it first with `build_kernel_ir.sh` (`--no-build` to refuse). `python3 -m extractor` is the same
+command. `scxa dot [kfunc]` renders the nodes reachable from `kfunc` (whole graph without it) within `--depth`
+calls: kfuncs bold, boundary nodes dashed yellow, external nodes grey, indirect edges dashed to their ops/method
+slot, call-site lines on the edges, and per node a summary of its events, lock tokens and written fields.
+`scxa check` (Epic C) is unchanged.
+
+`extractor/out/v7.1.callgraph.json` is the reference extraction for the pinned kernel (all 59 kfuncs, default
+limits), checked by the contracts CI. Regenerate it with the first command above after extractor changes.
+
+## Extraction (B3)
 
 `extractor/scxa_extract/` reads the textual IR directly (Python, no LLVM bindings):
 

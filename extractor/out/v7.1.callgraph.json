@@ -1,0 +1,8923 @@
+{
+ "kernel_version": "TBD (see KERNEL_VERSION)",
+ "kernel_commit": "8cd9520d35a6c38db6567e97dd93b1f11f185dc6",
+ "generator": "scxa-extract 0.1",
+ "roots": [
+  "scx_bpf_dsq_insert",
+  "scx_bpf_dsq_insert___v2",
+  "__scx_bpf_dsq_insert_vtime",
+  "scx_bpf_dsq_insert_vtime",
+  "scx_bpf_dispatch_nr_slots",
+  "scx_bpf_dispatch_cancel",
+  "scx_bpf_dsq_move_to_local",
+  "scx_bpf_dsq_move_to_local___v2",
+  "scx_bpf_dsq_move_set_slice",
+  "scx_bpf_dsq_move_set_vtime",
+  "scx_bpf_dsq_move",
+  "scx_bpf_dsq_move_vtime",
+  "scx_bpf_sub_dispatch",
+  "scx_bpf_reenqueue_local",
+  "scx_bpf_create_dsq",
+  "__scx_bpf_select_cpu_and",
+  "scx_bpf_select_cpu_and",
+  "scx_bpf_select_cpu_dfl",
+  "scx_bpf_task_set_slice",
+  "scx_bpf_task_set_dsq_vtime",
+  "scx_bpf_kick_cpu",
+  "scx_bpf_dsq_nr_queued",
+  "scx_bpf_destroy_dsq",
+  "scx_bpf_dsq_peek",
+  "scx_bpf_dsq_reenq",
+  "scx_bpf_reenqueue_local___v2",
+  "bpf_iter_scx_dsq_new",
+  "bpf_iter_scx_dsq_next",
+  "bpf_iter_scx_dsq_destroy",
+  "scx_bpf_exit_bstr",
+  "scx_bpf_error_bstr",
+  "scx_bpf_dump_bstr",
+  "scx_bpf_cpuperf_cap",
+  "scx_bpf_cpuperf_cur",
+  "scx_bpf_cpuperf_set",
+  "scx_bpf_nr_node_ids",
+  "scx_bpf_nr_cpu_ids",
+  "scx_bpf_get_possible_cpumask",
+  "scx_bpf_get_online_cpumask",
+  "scx_bpf_put_cpumask",
+  "scx_bpf_task_running",
+  "scx_bpf_task_cpu",
+  "scx_bpf_cpu_rq",
+  "scx_bpf_locked_rq",
+  "scx_bpf_cpu_curr",
+  "scx_bpf_now",
+  "scx_bpf_events",
+  "scx_bpf_task_cgroup",
+  "scx_bpf_cpu_node",
+  "scx_bpf_get_idle_cpumask_node",
+  "scx_bpf_get_idle_cpumask",
+  "scx_bpf_get_idle_smtmask_node",
+  "scx_bpf_get_idle_smtmask",
+  "scx_bpf_put_idle_cpumask",
+  "scx_bpf_test_and_clear_cpu_idle",
+  "scx_bpf_pick_idle_cpu_node",
+  "scx_bpf_pick_idle_cpu",
+  "scx_bpf_pick_any_cpu_node",
+  "scx_bpf_pick_any_cpu"
+ ],
+ "nodes": {
+  "__bstr_format": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 9201,
+   "end_line": 9236,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "data__sz % 8 || data__sz > MAX_BPRINTF_VARARGS * 8 || (data__sz && !data)",
+     "action": "error",
+     "line": 9208
+    },
+    {
+     "kind": "error",
+     "msg": "invalid data=%p and data__sz=%u",
+     "line": 9210
+    },
+    {
+     "kind": "call",
+     "target": "copy_from_kernel_nofault",
+     "line": 9214
+    },
+    {
+     "kind": "guard",
+     "cond": "ret < 0",
+     "action": "error",
+     "line": 9215
+    },
+    {
+     "kind": "error",
+     "msg": "failed to read data fields (%d)",
+     "line": 9216
+    },
+    {
+     "kind": "call",
+     "target": "bpf_bprintf_prepare",
+     "line": 9220
+    },
+    {
+     "kind": "guard",
+     "cond": "ret < 0",
+     "action": "error",
+     "line": 9222
+    },
+    {
+     "kind": "error",
+     "msg": "format preparation failed (%d)",
+     "line": 9223
+    },
+    {
+     "kind": "call",
+     "target": "bstr_printf",
+     "line": 9227
+    },
+    {
+     "kind": "call",
+     "target": "bpf_bprintf_cleanup",
+     "line": 9229
+    },
+    {
+     "kind": "guard",
+     "cond": "ret < 0",
+     "action": "error",
+     "line": 9230
+    },
+    {
+     "kind": "error",
+     "msg": "(\\\"%s\\\", %p, %u) failed to format",
+     "line": 9231
+    }
+   ],
+   "callees": [
+    {
+     "target": "copy_from_kernel_nofault",
+     "kind": "direct",
+     "line": 9214
+    },
+    {
+     "target": "bpf_bprintf_prepare",
+     "kind": "direct",
+     "line": 9220
+    },
+    {
+     "target": "bstr_printf",
+     "kind": "direct",
+     "line": 9227
+    },
+    {
+     "target": "bpf_bprintf_cleanup",
+     "kind": "direct",
+     "line": 9229
+    }
+   ]
+  },
+  "__cpu_valid": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1083,
+   "end_line": 1086,
+   "depth": 2,
+   "events": [],
+   "callees": []
+  },
+  "__kmalloc_cache_node_noprof": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "__raw_spin_lock_init": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "__rht_bucket_nested": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "__scx_bpf_dsq_insert_vtime": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8285,
+   "end_line": 8299,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8293
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 8294
+    },
+    {
+     "kind": "call",
+     "target": "scx_dsq_insert_vtime",
+     "line": 8297
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8293
+    },
+    {
+     "target": "scx_dsq_insert_vtime",
+     "kind": "direct",
+     "line": 8297
+    }
+   ]
+  },
+  "__scx_bpf_select_cpu_and": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1069,
+   "end_line": 1083,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1077
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1078
+    },
+    {
+     "kind": "call",
+     "target": "select_cpu_from_kfunc",
+     "line": 1081
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1077
+    },
+    {
+     "target": "select_cpu_from_kfunc",
+     "kind": "direct",
+     "line": 1081
+    }
+   ]
+  },
+  "__srcu_check_read_flavor": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "__this_rq": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1394,
+   "end_line": 1397,
+   "depth": 1,
+   "events": [],
+   "callees": []
+  },
+  "_raw_spin_rq_lock_irqsave": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1647,
+   "end_line": 1656,
+   "depth": 2,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "raw_spin_rq_lock",
+     "line": 1653
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 1653
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 1653
+    }
+   ],
+   "callees": [
+    {
+     "target": "raw_spin_rq_lock",
+     "kind": "direct",
+     "line": 1653
+    }
+   ]
+  },
+  "activate_task": {
+   "kind": "boundary",
+   "file": "kernel/sched/core.c",
+   "line": 2200,
+   "end_line": 2209,
+   "depth": 4,
+   "callees": []
+  },
+  "arch_scale_cpu_capacity": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "assert_balance_callbacks_empty": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1871,
+   "end_line": 1876,
+   "depth": 3,
+   "reads": [
+    "rq.balance_callback"
+   ],
+   "events": [
+    {
+     "kind": "warn",
+     "msg": "IS_ENABLED(CONFIG_PROVE_LOCKING) && rq->balance_callback && rq->balance_callback != &balance_push_callback",
+     "line": 1873
+    }
+   ],
+   "callees": []
+  },
+  "assert_clock_updated": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1763,
+   "end_line": 1770,
+   "depth": 3,
+   "reads": [
+    "rq.clock_update_flags"
+   ],
+   "events": [
+    {
+     "kind": "warn",
+     "msg": "rq->clock_update_flags < RQCF_ACT_SKIP",
+     "line": 1769
+    }
+   ],
+   "callees": []
+  },
+  "bcmp": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "bpf_bprintf_cleanup": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "bpf_bprintf_prepare": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "bpf_iter_scx_dsq_destroy": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9090,
+   "end_line": 9105,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "!kit->dsq",
+     "action": "return",
+     "line": 9094
+    },
+    {
+     "kind": "lock",
+     "lock": "dsq",
+     "expr": "&kit->dsq->lock",
+     "line": 9100
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&kit->dsq->lock",
+     "line": 9102
+    }
+   ],
+   "callees": []
+  },
+  "bpf_iter_scx_dsq_new": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9031,
+   "end_line": 9064,
+   "depth": 0,
+   "reads": [
+    "scx_dispatch_q.seq"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9050
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 9051
+    },
+    {
+     "kind": "guard",
+     "cond": "flags & ~__SCX_DSQ_ITER_USER_FLAGS",
+     "action": "return",
+     "line": 9054
+    },
+    {
+     "kind": "call",
+     "target": "find_user_dsq",
+     "line": 9057
+    },
+    {
+     "kind": "guard",
+     "cond": "!kit->dsq",
+     "action": "return",
+     "line": 9058
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9050
+    },
+    {
+     "target": "find_user_dsq",
+     "kind": "direct",
+     "line": 9057
+    }
+   ]
+  },
+  "bpf_iter_scx_dsq_next": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9072,
+   "end_line": 9082,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "!kit->dsq",
+     "action": "return",
+     "line": 9076
+    },
+    {
+     "kind": "lock",
+     "lock": "dsq",
+     "expr": "&kit->dsq->lock",
+     "line": 9079
+    },
+    {
+     "kind": "call",
+     "target": "nldsq_cursor_next_task",
+     "line": 9081
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "line": 9082
+    }
+   ],
+   "callees": [
+    {
+     "target": "nldsq_cursor_next_task",
+     "kind": "direct",
+     "line": 9081
+    }
+   ]
+  },
+  "bpf_prog_get_assoc_struct_ops": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "bstr_format": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 9238,
+   "end_line": 9243,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "call",
+     "target": "__bstr_format",
+     "line": 9241
+    }
+   ],
+   "callees": [
+    {
+     "target": "__bstr_format",
+     "kind": "direct",
+     "line": 9241
+    }
+   ]
+  },
+  "bstr_printf": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "bypass_dsp_enabled": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 389,
+   "end_line": 392,
+   "depth": 2,
+   "reads": [
+    "task_struct.perf_event_mutex"
+   ],
+   "events": [
+    {
+     "kind": "atomic",
+     "field": "task_struct.perf_event_mutex",
+     "op": "read",
+     "line": 391
+    }
+   ],
+   "callees": []
+  },
+  "bypass_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 348,
+   "end_line": 351,
+   "depth": 2,
+   "reads": [
+    "task_struct.perf_event_mutex"
+   ],
+   "events": [],
+   "callees": []
+  },
+  "bypass_enq_target_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 353,
+   "end_line": 372,
+   "depth": 3,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_parent",
+     "line": 367
+    },
+    {
+     "kind": "call",
+     "target": "scx_bypassing",
+     "line": 367
+    },
+    {
+     "kind": "call",
+     "target": "scx_parent",
+     "line": 368
+    },
+    {
+     "kind": "call",
+     "target": "bypass_dsq",
+     "line": 371
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_bypassing",
+     "kind": "direct",
+     "line": 367
+    },
+    {
+     "target": "scx_parent",
+     "kind": "direct",
+     "line": 367
+    },
+    {
+     "target": "scx_parent",
+     "kind": "direct",
+     "line": 368
+    },
+    {
+     "target": "bypass_dsq",
+     "kind": "direct",
+     "line": 371
+    }
+   ]
+  },
+  "call_task_dequeue": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1446,
+   "end_line": 1456,
+   "depth": 4,
+   "reads": [
+    "task_struct.scx.flags",
+    "task_struct.scx.kf_tasks"
+   ],
+   "writes": [
+    "task_struct.scx.flags",
+    "task_struct.scx.kf_tasks"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "!(p->scx.flags & SCX_TASK_IN_CUSTODY) || task_scx_migrating(p)",
+     "action": "return",
+     "line": 1449
+    },
+    {
+     "kind": "call",
+     "target": "task_scx_migrating",
+     "line": 1449
+    },
+    {
+     "kind": "warn",
+     "line": 1453
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.kf_tasks",
+     "op": "set",
+     "line": 1453
+    },
+    {
+     "kind": "call",
+     "target": "ops.dequeue",
+     "line": 1453
+    },
+    {
+     "kind": "call",
+     "target": "scx_locked_rq",
+     "line": 1453
+    },
+    {
+     "kind": "call",
+     "target": "update_locked_rq",
+     "line": 1453
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.flags",
+     "op": "set",
+     "line": 1455
+    }
+   ],
+   "callees": [
+    {
+     "target": "task_scx_migrating",
+     "kind": "direct",
+     "line": 1449
+    },
+    {
+     "target": "ops.dequeue",
+     "kind": "indirect",
+     "line": 1453
+    },
+    {
+     "target": "scx_locked_rq",
+     "kind": "direct",
+     "line": 1453
+    },
+    {
+     "target": "update_locked_rq",
+     "kind": "direct",
+     "line": 1453
+    }
+   ]
+  },
+  "can_skip_idle_kick": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 7830,
+   "end_line": 7845,
+   "depth": 2,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "rq.scx.flags",
+    "task_struct.flags"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 7832
+    }
+   ],
+   "callees": []
+  },
+  "cgroup_get": {
+   "kind": "boundary",
+   "file": "include/linux/cgroup.h",
+   "line": 439,
+   "end_line": 442,
+   "depth": 1,
+   "callees": []
+  },
+  "check_builtin_idle_enabled": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 870,
+   "end_line": 877,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "error",
+     "msg": "built-in idle tracking is disabled",
+     "line": 875
+    }
+   ],
+   "callees": []
+  },
+  "clear_direct_dispatch": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1812,
+   "end_line": 1816,
+   "depth": 3,
+   "writes": [
+    "task_struct.scx.ddsp_dsq_id",
+    "task_struct.scx.ddsp_enq_flags"
+   ],
+   "events": [
+    {
+     "kind": "write",
+     "field": "task_struct.scx.ddsp_dsq_id",
+     "op": "set",
+     "line": 1814
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.ddsp_enq_flags",
+     "op": "set",
+     "line": 1815
+    }
+   ],
+   "callees": []
+  },
+  "consume_dispatch_q": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2512,
+   "end_line": 2557,
+   "depth": 1,
+   "reads": [
+    "scx_dispatch_q.id",
+    "scx_dispatch_q.list",
+    "task_struct.thread_info.cpu"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "list_empty(&dsq->list)",
+     "action": "return",
+     "line": 2522
+    },
+    {
+     "kind": "lock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 2525
+    },
+    {
+     "kind": "call",
+     "target": "nldsq_next_task",
+     "line": 2527
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(READ_ONCE(sch->aborting)) && dsq->id != SCX_DSQ_BYPASS",
+     "action": "continue",
+     "line": 2538
+    },
+    {
+     "kind": "guard",
+     "cond": "rq == task_rq",
+     "action": "return",
+     "line": 2541
+    },
+    {
+     "kind": "call",
+     "target": "task_unlink_from_dsq",
+     "line": 2542
+    },
+    {
+     "kind": "call",
+     "target": "move_local_task_to_local_dsq",
+     "line": 2543
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 2544
+    },
+    {
+     "kind": "call",
+     "target": "task_can_run_on_remote_rq",
+     "line": 2548
+    },
+    {
+     "kind": "guard",
+     "cond": "task_can_run_on_remote_rq(sch, p, rq, false)",
+     "action": "continue",
+     "line": 2548
+    },
+    {
+     "kind": "call",
+     "target": "consume_remote_task",
+     "line": 2549
+    },
+    {
+     "kind": "guard",
+     "cond": "likely(consume_remote_task(rq, p, enq_flags, dsq, task_rq))",
+     "action": "return",
+     "line": 2549
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 2555
+    }
+   ],
+   "callees": [
+    {
+     "target": "nldsq_next_task",
+     "kind": "direct",
+     "line": 2527
+    },
+    {
+     "target": "task_unlink_from_dsq",
+     "kind": "direct",
+     "line": 2542
+    },
+    {
+     "target": "move_local_task_to_local_dsq",
+     "kind": "direct",
+     "line": 2543
+    },
+    {
+     "target": "task_can_run_on_remote_rq",
+     "kind": "direct",
+     "line": 2548
+    },
+    {
+     "target": "consume_remote_task",
+     "kind": "direct",
+     "line": 2549
+    }
+   ]
+  },
+  "consume_global_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2559,
+   "end_line": 2564,
+   "depth": 2,
+   "events": [
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 2561
+    },
+    {
+     "kind": "call",
+     "target": "consume_dispatch_q",
+     "line": 2563
+    }
+   ],
+   "callees": [
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 2561
+    },
+    {
+     "target": "consume_dispatch_q",
+     "kind": "direct",
+     "line": 2563
+    }
+   ]
+  },
+  "consume_remote_task": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2426,
+   "end_line": 2440,
+   "depth": 2,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "events": [
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "this_rq",
+     "line": 2430
+    },
+    {
+     "kind": "call",
+     "target": "unlink_dsq_and_lock_src_rq",
+     "line": 2432
+    },
+    {
+     "kind": "guard",
+     "cond": "unlink_dsq_and_lock_src_rq(p, dsq, src_rq)",
+     "action": "return",
+     "line": 2432
+    },
+    {
+     "kind": "call",
+     "target": "move_remote_task_to_local_dsq",
+     "line": 2433
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "src_rq",
+     "line": 2436
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "this_rq",
+     "line": 2437
+    }
+   ],
+   "callees": [
+    {
+     "target": "unlink_dsq_and_lock_src_rq",
+     "kind": "direct",
+     "line": 2432
+    },
+    {
+     "target": "move_remote_task_to_local_dsq",
+     "kind": "direct",
+     "line": 2433
+    }
+   ]
+  },
+  "copy_from_kernel_nofault": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "cpu_of": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1374,
+   "end_line": 1377,
+   "depth": 1,
+   "reads": [
+    "rq.cpu"
+   ],
+   "events": [],
+   "callees": []
+  },
+  "cpufreq_update_util": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 3497,
+   "end_line": 3505,
+   "depth": 1,
+   "reads": [
+    "rq.clock",
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 3501
+    },
+    {
+     "kind": "call",
+     "target": "rcu_read_lock_sched_held",
+     "line": 3501
+    },
+    {
+     "kind": "call",
+     "target": "update_util_data.func",
+     "line": 3504
+    },
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 3504
+    },
+    {
+     "kind": "call",
+     "target": "rq_clock",
+     "line": 3504
+    }
+   ],
+   "callees": [
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 3501
+    },
+    {
+     "target": "rcu_read_lock_sched_held",
+     "kind": "direct",
+     "line": 3501
+    },
+    {
+     "target": "rq_clock",
+     "kind": "direct",
+     "line": 3504
+    },
+    {
+     "target": "update_util_data.func",
+     "kind": "indirect",
+     "line": 3504
+    }
+   ]
+  },
+  "cpumask_any_and_distribute": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "cpumask_any_distribute": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "cpus_share_cache": {
+   "kind": "boundary",
+   "file": "kernel/sched/core.c",
+   "line": 3886,
+   "end_line": 3892,
+   "depth": 3,
+   "callees": []
+  },
+  "deactivate_task": {
+   "kind": "boundary",
+   "file": "kernel/sched/core.c",
+   "line": 2211,
+   "end_line": 2224,
+   "depth": 4,
+   "callees": []
+  },
+  "destroy_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 4648,
+   "end_line": 4685,
+   "depth": 1,
+   "reads": [
+    "scx_dispatch_q.hash_node",
+    "scx_dispatch_q.id",
+    "scx_dispatch_q.nr"
+   ],
+   "writes": [
+    "scx_dispatch_q.free_node",
+    "scx_dispatch_q.id"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "find_user_dsq",
+     "line": 4655
+    },
+    {
+     "kind": "guard",
+     "cond": "!dsq",
+     "action": "continue",
+     "line": 4656
+    },
+    {
+     "kind": "lock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 4659
+    },
+    {
+     "kind": "guard",
+     "cond": "dsq->nr",
+     "action": "continue",
+     "line": 4661
+    },
+    {
+     "kind": "error",
+     "msg": "attempting to destroy in-use dsq 0x%016llx (nr=%u)",
+     "line": 4662
+    },
+    {
+     "kind": "guard",
+     "cond": "rhashtable_remove_fast(&sch->dsq_hash, &dsq->hash_node, dsq_hash_params)",
+     "action": "continue",
+     "line": 4667
+    },
+    {
+     "kind": "call",
+     "target": "rcu_read_lock_any_held",
+     "line": 4667
+    },
+    {
+     "kind": "call",
+     "target": "jhash2",
+     "line": 4667
+    },
+    {
+     "kind": "call",
+     "target": "__rht_bucket_nested",
+     "line": 4667
+    },
+    {
+     "kind": "warn",
+     "line": 4667
+    },
+    {
+     "kind": "call",
+     "target": "queue_work_on",
+     "line": 4667
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.id",
+     "op": "set",
+     "line": 4677
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.free_node",
+     "op": "list_add",
+     "line": 4678
+    },
+    {
+     "kind": "call",
+     "target": "irq_work_queue",
+     "line": 4679
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 4682
+    }
+   ],
+   "callees": [
+    {
+     "target": "find_user_dsq",
+     "kind": "direct",
+     "line": 4655
+    },
+    {
+     "target": "__rht_bucket_nested",
+     "kind": "direct",
+     "line": 4667
+    },
+    {
+     "target": "jhash2",
+     "kind": "direct",
+     "line": 4667
+    },
+    {
+     "target": "queue_work_on",
+     "kind": "direct",
+     "line": 4667
+    },
+    {
+     "target": "rcu_read_lock_any_held",
+     "kind": "direct",
+     "line": 4667
+    },
+    {
+     "target": "irq_work_queue",
+     "kind": "direct",
+     "line": 4679
+    }
+   ]
+  },
+  "direct_dispatch": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1818,
+   "end_line": 1869,
+   "depth": 3,
+   "reads": [
+    "rq.scx.ddsp_deferred_locals",
+    "scx_dispatch_q.id",
+    "task_struct.pid",
+    "task_struct.scx.ddsp_enq_flags",
+    "task_struct.scx.dsq",
+    "task_struct.scx.dsq_list.node",
+    "task_struct.scx.ops_state",
+    "task_struct.thread_info.cpu"
+   ],
+   "writes": [
+    "rq.scx.ddsp_deferred_locals",
+    "task_struct.scx.ddsp_enq_flags",
+    "task_struct.scx.dsq_list.node",
+    "task_struct.scx.ops_state"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "find_dsq_for_dispatch",
+     "line": 1823
+    },
+    {
+     "kind": "call",
+     "target": "touch_core_sched_dispatch",
+     "line": 1826
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.ddsp_enq_flags",
+     "op": "set",
+     "line": 1828
+    },
+    {
+     "kind": "guard",
+     "cond": "dsq->id == SCX_DSQ_LOCAL && dsq != &rq->scx.local_dsq",
+     "action": "error",
+     "line": 1836
+    },
+    {
+     "kind": "atomic",
+     "field": "task_struct.scx.ops_state",
+     "op": "read",
+     "line": 1839
+    },
+    {
+     "kind": "warn",
+     "msg": "p->scx.dsq || !list_empty(&p->scx.dsq_list.node)",
+     "line": 1858
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.ddsp_deferred_locals",
+     "op": "list_add",
+     "line": 1859
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_list.node",
+     "op": "list_add",
+     "line": 1859
+    },
+    {
+     "kind": "call",
+     "target": "schedule_deferred_locked",
+     "line": 1861
+    },
+    {
+     "kind": "call",
+     "target": "clear_direct_dispatch",
+     "line": 1866
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_enqueue",
+     "line": 1868
+    }
+   ],
+   "callees": [
+    {
+     "target": "find_dsq_for_dispatch",
+     "kind": "direct",
+     "line": 1823
+    },
+    {
+     "target": "touch_core_sched_dispatch",
+     "kind": "direct",
+     "line": 1826
+    },
+    {
+     "target": "schedule_deferred_locked",
+     "kind": "direct",
+     "line": 1861
+    },
+    {
+     "target": "clear_direct_dispatch",
+     "kind": "direct",
+     "line": 1866
+    },
+    {
+     "target": "dispatch_enqueue",
+     "kind": "direct",
+     "line": 1868
+    }
+   ]
+  },
+  "dispatch_dequeue": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1668,
+   "end_line": 1719,
+   "depth": 2,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "task_struct.scx.dsq",
+    "task_struct.scx.dsq_list.node",
+    "task_struct.scx.holding_cpu"
+   ],
+   "writes": [
+    "task_struct.scx.dsq",
+    "task_struct.scx.dsq_list.node",
+    "task_struct.scx.holding_cpu"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 1673
+    },
+    {
+     "kind": "guard",
+     "cond": "!dsq",
+     "action": "return",
+     "line": 1675
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_list.node",
+     "op": "list_del",
+     "line": 1681
+    },
+    {
+     "kind": "guard",
+     "cond": "p->scx.holding_cpu >= 0",
+     "action": "fallback",
+     "line": 1689
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.holding_cpu",
+     "op": "set",
+     "line": 1690
+    },
+    {
+     "kind": "lock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 1696
+    },
+    {
+     "kind": "call",
+     "target": "task_unlink_from_dsq",
+     "line": 1704
+    },
+    {
+     "kind": "warn",
+     "msg": "!list_empty(&p->scx.dsq_list.node)",
+     "line": 1712
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.holding_cpu",
+     "op": "set",
+     "line": 1713
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq",
+     "op": "set",
+     "line": 1715
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 1718
+    }
+   ],
+   "callees": [
+    {
+     "target": "task_unlink_from_dsq",
+     "kind": "direct",
+     "line": 1704
+    }
+   ]
+  },
+  "dispatch_dequeue_locked": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1725,
+   "end_line": 1733,
+   "depth": 3,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "task_struct.thread_info.cpu"
+   ],
+   "writes": [
+    "task_struct.scx.dsq"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "task_rq(p)",
+     "line": 1728
+    },
+    {
+     "kind": "assert_held",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 1729
+    },
+    {
+     "kind": "call",
+     "target": "task_unlink_from_dsq",
+     "line": 1731
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq",
+     "op": "set",
+     "line": 1732
+    }
+   ],
+   "callees": [
+    {
+     "target": "task_unlink_from_dsq",
+     "kind": "direct",
+     "line": 1731
+    }
+   ]
+  },
+  "dispatch_enqueue": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1518,
+   "end_line": 1644,
+   "depth": 3,
+   "reads": [
+    "scx_dispatch_q.first_task",
+    "scx_dispatch_q.id",
+    "scx_dispatch_q.list",
+    "scx_dispatch_q.priq",
+    "scx_dispatch_q.seq",
+    "task_struct.scx.dsq",
+    "task_struct.scx.dsq_flags",
+    "task_struct.scx.dsq_list.node",
+    "task_struct.scx.dsq_priq",
+    "task_struct.scx.dsq_vtime",
+    "task_struct.scx.flags",
+    "task_struct.thread_info.cpu"
+   ],
+   "writes": [
+    "scx_dispatch_q.first_task",
+    "scx_dispatch_q.list",
+    "scx_dispatch_q.seq",
+    "task_struct.scx.dsq",
+    "task_struct.scx.dsq_flags",
+    "task_struct.scx.dsq_list.node",
+    "task_struct.scx.dsq_priq",
+    "task_struct.scx.dsq_seq",
+    "task_struct.scx.flags",
+    "task_struct.scx.ops_state"
+   ],
+   "events": [
+    {
+     "kind": "warn",
+     "msg": "p->scx.dsq || !list_empty(&p->scx.dsq_list.node)",
+     "line": 1524
+    },
+    {
+     "kind": "warn",
+     "msg": "(p->scx.dsq_flags & SCX_TASK_DSQ_ON_PRIQ) || !RB_EMPTY_NODE(&p->scx.dsq_priq)",
+     "line": 1525
+    },
+    {
+     "kind": "lock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 1529
+    },
+    {
+     "kind": "error",
+     "msg": "attempting to dispatch to a destroyed dsq",
+     "line": 1533
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 1535
+    },
+    {
+     "kind": "call",
+     "target": "find_global_dsq",
+     "line": 1536
+    },
+    {
+     "kind": "lock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 1537
+    },
+    {
+     "kind": "error",
+     "msg": "cannot use vtime ordering for built-in DSQs",
+     "line": 1550
+    },
+    {
+     "kind": "call",
+     "target": "nldsq_next_task",
+     "line": 1562
+    },
+    {
+     "kind": "error",
+     "msg": "DSQ ID 0x%016llx already had FIFO-enqueued tasks",
+     "line": 1564
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_flags",
+     "op": "set",
+     "line": 1567
+    },
+    {
+     "kind": "call",
+     "target": "rb_add",
+     "line": 1568
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_priq",
+     "op": "rb_insert",
+     "line": 1568
+    },
+    {
+     "kind": "call",
+     "target": "rb_insert_color",
+     "line": 1568
+    },
+    {
+     "kind": "call",
+     "target": "rb_prev",
+     "line": 1574
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_list.node",
+     "op": "list_add",
+     "line": 1579
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_list.node",
+     "op": "list_add",
+     "line": 1582
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.list",
+     "op": "list_add",
+     "line": 1582
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.first_task",
+     "op": "write_once",
+     "line": 1584
+    },
+    {
+     "kind": "error",
+     "msg": "DSQ ID 0x%016llx already had PRIQ-enqueued tasks",
+     "line": 1589
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_list.node",
+     "op": "list_add",
+     "line": 1593
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.list",
+     "op": "list_add",
+     "line": 1593
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.first_task",
+     "op": "write_once",
+     "line": 1596
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.list",
+     "op": "list_add",
+     "line": 1603
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_list.node",
+     "op": "list_add",
+     "line": 1603
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.first_task",
+     "op": "write_once",
+     "line": 1605
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.seq",
+     "op": "write_once",
+     "line": 1610
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_seq",
+     "op": "set",
+     "line": 1611
+    },
+    {
+     "kind": "call",
+     "target": "dsq_inc_nr",
+     "line": 1613
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq",
+     "op": "set",
+     "line": 1614
+    },
+    {
+     "kind": "call",
+     "target": "local_dsq_post_enq",
+     "line": 1624
+    },
+    {
+     "kind": "call",
+     "target": "call_task_dequeue",
+     "line": 1631
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.flags",
+     "op": "set",
+     "line": 1633
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 1635
+    },
+    {
+     "kind": "atomic",
+     "field": "task_struct.scx.ops_state",
+     "op": "set_release",
+     "line": 1643
+    }
+   ],
+   "callees": [
+    {
+     "target": "find_global_dsq",
+     "kind": "direct",
+     "line": 1536
+    },
+    {
+     "target": "nldsq_next_task",
+     "kind": "direct",
+     "line": 1562
+    },
+    {
+     "target": "rb_add",
+     "kind": "direct",
+     "line": 1568
+    },
+    {
+     "target": "rb_insert_color",
+     "kind": "direct",
+     "line": 1568
+    },
+    {
+     "target": "rb_prev",
+     "kind": "direct",
+     "line": 1574
+    },
+    {
+     "target": "dsq_inc_nr",
+     "kind": "direct",
+     "line": 1613
+    },
+    {
+     "target": "local_dsq_post_enq",
+     "kind": "direct",
+     "line": 1624
+    },
+    {
+     "target": "call_task_dequeue",
+     "kind": "direct",
+     "line": 1631
+    }
+   ]
+  },
+  "dispatch_to_local_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2581,
+   "end_line": 2660,
+   "depth": 3,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "task_struct.sched_class",
+    "task_struct.scx.holding_cpu",
+    "task_struct.thread_info.cpu"
+   ],
+   "writes": [
+    "task_struct.scx.holding_cpu",
+    "task_struct.scx.ops_state"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "rq == src_rq && rq == dst_rq",
+     "action": "return",
+     "line": 2595
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_enqueue",
+     "line": 2596
+    },
+    {
+     "kind": "guard",
+     "cond": "src_rq != dst_rq && unlikely(!task_can_run_on_remote_rq(sch, p, dst_rq, true))",
+     "action": "return",
+     "line": 2601
+    },
+    {
+     "kind": "call",
+     "target": "task_can_run_on_remote_rq",
+     "line": 2602
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_enqueue",
+     "line": 2603
+    },
+    {
+     "kind": "call",
+     "target": "find_global_dsq",
+     "line": 2603
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.holding_cpu",
+     "op": "set",
+     "line": 2619
+    },
+    {
+     "kind": "atomic",
+     "field": "task_struct.scx.ops_state",
+     "op": "set_release",
+     "line": 2622
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "locked_rq",
+     "line": 2626
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "src_rq",
+     "line": 2628
+    },
+    {
+     "kind": "warn",
+     "msg": "src_rq != task_rq(p)",
+     "line": 2633
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.holding_cpu",
+     "op": "set",
+     "line": 2640
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_enqueue",
+     "line": 2641
+    },
+    {
+     "kind": "call",
+     "target": "move_remote_task_to_local_dsq",
+     "line": 2644
+    },
+    {
+     "kind": "call",
+     "target": "resched_curr",
+     "line": 2652
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "locked_rq",
+     "line": 2657
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 2658
+    }
+   ],
+   "callees": [
+    {
+     "target": "dispatch_enqueue",
+     "kind": "direct",
+     "line": 2596
+    },
+    {
+     "target": "task_can_run_on_remote_rq",
+     "kind": "direct",
+     "line": 2602
+    },
+    {
+     "target": "dispatch_enqueue",
+     "kind": "direct",
+     "line": 2603
+    },
+    {
+     "target": "find_global_dsq",
+     "kind": "direct",
+     "line": 2603
+    },
+    {
+     "target": "dispatch_enqueue",
+     "kind": "direct",
+     "line": 2641
+    },
+    {
+     "target": "move_remote_task_to_local_dsq",
+     "kind": "direct",
+     "line": 2644
+    },
+    {
+     "target": "resched_curr",
+     "kind": "direct",
+     "line": 2652
+    }
+   ]
+  },
+  "do_enqueue_task": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1883,
+   "end_line": 1993,
+   "depth": 2,
+   "reads": [
+    "rq.scx.ops_qseq",
+    "task_struct.flags",
+    "task_struct.scx.ddsp_dsq_id",
+    "task_struct.scx.flags",
+    "task_struct.scx.kf_tasks",
+    "task_struct.scx.ops_state",
+    "task_struct.thread_info.cpu"
+   ],
+   "writes": [
+    "rq.scx.ops_qseq",
+    "task_struct.scx.flags",
+    "task_struct.scx.kf_tasks",
+    "task_struct.scx.ops_state"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_task_sched",
+     "line": 1886
+    },
+    {
+     "kind": "warn",
+     "msg": "!(p->scx.flags & SCX_TASK_QUEUED)",
+     "line": 1891
+    },
+    {
+     "kind": "guard",
+     "cond": "sticky_cpu == cpu_of(rq)",
+     "action": "continue",
+     "line": 1894
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 1894
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.flags",
+     "op": "set",
+     "line": 1903
+    },
+    {
+     "kind": "guard",
+     "cond": "!scx_rq_online(rq)",
+     "action": "continue",
+     "line": 1910
+    },
+    {
+     "kind": "call",
+     "target": "scx_rq_online",
+     "line": 1910
+    },
+    {
+     "kind": "call",
+     "target": "scx_bypassing",
+     "line": 1913
+    },
+    {
+     "kind": "guard",
+     "cond": "scx_bypassing(sch, cpu_of(rq))",
+     "action": "continue",
+     "line": 1913
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 1913
+    },
+    {
+     "kind": "guard",
+     "cond": "p->scx.ddsp_dsq_id != SCX_DSQ_INVALID",
+     "action": "continue",
+     "line": 1918
+    },
+    {
+     "kind": "guard",
+     "cond": "!(sch->ops.flags & SCX_OPS_ENQ_EXITING) && unlikely(p->flags & PF_EXITING)",
+     "action": "continue",
+     "line": 1922
+    },
+    {
+     "kind": "guard",
+     "cond": "!(sch->ops.flags & SCX_OPS_ENQ_MIGRATION_DISABLED) && is_migration_disabled(p)",
+     "action": "continue",
+     "line": 1929
+    },
+    {
+     "kind": "call",
+     "target": "is_migration_disabled",
+     "line": 1930
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!SCX_HAS_OP(sch, enqueue))",
+     "action": "continue",
+     "line": 1935
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.ops_qseq",
+     "op": "set",
+     "line": 1939
+    },
+    {
+     "kind": "atomic",
+     "field": "task_struct.scx.ops_state",
+     "op": "read",
+     "line": 1941
+    },
+    {
+     "kind": "warn",
+     "msg": "atomic_long_read(&p->scx.ops_state) != SCX_OPSS_NONE",
+     "line": 1941
+    },
+    {
+     "kind": "atomic",
+     "field": "task_struct.scx.ops_state",
+     "op": "set",
+     "line": 1942
+    },
+    {
+     "kind": "warn",
+     "msg": "*ddsp_taskp",
+     "line": 1945
+    },
+    {
+     "kind": "warn",
+     "line": 1948
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.kf_tasks",
+     "op": "set",
+     "line": 1948
+    },
+    {
+     "kind": "call",
+     "target": "ops.enqueue",
+     "line": 1948
+    },
+    {
+     "kind": "call",
+     "target": "scx_locked_rq",
+     "line": 1948
+    },
+    {
+     "kind": "call",
+     "target": "update_locked_rq",
+     "line": 1948
+    },
+    {
+     "kind": "guard",
+     "cond": "p->scx.ddsp_dsq_id != SCX_DSQ_INVALID",
+     "action": "continue",
+     "line": 1951
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.flags",
+     "op": "set",
+     "line": 1958
+    },
+    {
+     "kind": "atomic",
+     "field": "task_struct.scx.ops_state",
+     "op": "set_release",
+     "line": 1964
+    },
+    {
+     "kind": "call",
+     "target": "direct_dispatch",
+     "line": 1968
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_enqueue",
+     "line": 1971
+    },
+    {
+     "kind": "call",
+     "target": "find_global_dsq",
+     "line": 1977
+    },
+    {
+     "kind": "call",
+     "target": "bypass_enq_target_dsq",
+     "line": 1980
+    },
+    {
+     "kind": "call",
+     "target": "touch_core_sched",
+     "line": 1989
+    },
+    {
+     "kind": "call",
+     "target": "refill_task_slice_dfl",
+     "line": 1990
+    },
+    {
+     "kind": "call",
+     "target": "clear_direct_dispatch",
+     "line": 1991
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_enqueue",
+     "line": 1992
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_task_sched",
+     "kind": "direct",
+     "line": 1886
+    },
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 1894
+    },
+    {
+     "target": "scx_rq_online",
+     "kind": "direct",
+     "line": 1910
+    },
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 1913
+    },
+    {
+     "target": "scx_bypassing",
+     "kind": "direct",
+     "line": 1913
+    },
+    {
+     "target": "is_migration_disabled",
+     "kind": "direct",
+     "line": 1930
+    },
+    {
+     "target": "ops.enqueue",
+     "kind": "indirect",
+     "line": 1948
+    },
+    {
+     "target": "scx_locked_rq",
+     "kind": "direct",
+     "line": 1948
+    },
+    {
+     "target": "update_locked_rq",
+     "kind": "direct",
+     "line": 1948
+    },
+    {
+     "target": "direct_dispatch",
+     "kind": "direct",
+     "line": 1968
+    },
+    {
+     "target": "dispatch_enqueue",
+     "kind": "direct",
+     "line": 1971
+    },
+    {
+     "target": "find_global_dsq",
+     "kind": "direct",
+     "line": 1977
+    },
+    {
+     "target": "bypass_enq_target_dsq",
+     "kind": "direct",
+     "line": 1980
+    },
+    {
+     "target": "touch_core_sched",
+     "kind": "direct",
+     "line": 1989
+    },
+    {
+     "target": "refill_task_slice_dfl",
+     "kind": "direct",
+     "line": 1990
+    },
+    {
+     "target": "clear_direct_dispatch",
+     "kind": "direct",
+     "line": 1991
+    },
+    {
+     "target": "dispatch_enqueue",
+     "kind": "direct",
+     "line": 1992
+    }
+   ]
+  },
+  "dsq_dec_nr": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1405,
+   "end_line": 1419,
+   "depth": 3,
+   "reads": [
+    "rq.scx.nr_immed",
+    "scx_dispatch_q.id",
+    "scx_dispatch_q.nr",
+    "task_struct.scx.flags"
+   ],
+   "writes": [
+    "rq.scx.nr_immed",
+    "scx_dispatch_q.nr"
+   ],
+   "events": [
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.nr",
+     "op": "write_once",
+     "line": 1408
+    },
+    {
+     "kind": "guard",
+     "cond": "WARN_ON_ONCE(dsq->id != SCX_DSQ_LOCAL) || WARN_ON_ONCE(rq->scx.nr_immed <= 0)",
+     "action": "return",
+     "line": 1413
+    },
+    {
+     "kind": "warn",
+     "msg": "dsq->id != SCX_DSQ_LOCAL",
+     "line": 1413
+    },
+    {
+     "kind": "warn",
+     "msg": "rq->scx.nr_immed <= 0",
+     "line": 1414
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.nr_immed",
+     "op": "set",
+     "line": 1417
+    }
+   ],
+   "callees": []
+  },
+  "dsq_inc_nr": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1367,
+   "end_line": 1403,
+   "depth": 3,
+   "reads": [
+    "rq.scx.nr_immed",
+    "scx_dispatch_q.id",
+    "scx_dispatch_q.nr",
+    "task_struct.scx.flags"
+   ],
+   "writes": [
+    "rq.scx.nr_immed",
+    "scx_dispatch_q.nr",
+    "task_struct.scx.flags"
+   ],
+   "events": [
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.nr",
+     "op": "write_once",
+     "line": 1370
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(dsq->id != SCX_DSQ_LOCAL)",
+     "action": "error",
+     "line": 1381
+    },
+    {
+     "kind": "warn",
+     "msg": "!(enq_flags & SCX_ENQ_GDSQ_FALLBACK)",
+     "line": 1382
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.flags",
+     "op": "set",
+     "line": 1385
+    },
+    {
+     "kind": "guard",
+     "cond": "WARN_ON_ONCE(dsq->id != SCX_DSQ_LOCAL)",
+     "action": "return",
+     "line": 1391
+    },
+    {
+     "kind": "warn",
+     "msg": "dsq->id != SCX_DSQ_LOCAL",
+     "line": 1391
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.nr_immed",
+     "op": "set",
+     "line": 1394
+    },
+    {
+     "kind": "call",
+     "target": "rq_is_open",
+     "line": 1400
+    },
+    {
+     "kind": "call",
+     "target": "schedule_reenq_local",
+     "line": 1401
+    }
+   ],
+   "callees": [
+    {
+     "target": "rq_is_open",
+     "kind": "direct",
+     "line": 1400
+    },
+    {
+     "target": "schedule_reenq_local",
+     "kind": "direct",
+     "line": 1401
+    }
+   ]
+  },
+  "dump_line": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 6157,
+   "end_line": 6181,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "call",
+     "target": "vscnprintf",
+     "line": 6167
+    },
+    {
+     "kind": "call",
+     "target": "__srcu_check_read_flavor",
+     "line": 6170
+    },
+    {
+     "kind": "call",
+     "target": "seq_buf_vprintf",
+     "line": 6176
+    },
+    {
+     "kind": "call",
+     "target": "seq_buf_putc",
+     "line": 6179
+    }
+   ],
+   "callees": [
+    {
+     "target": "vscnprintf",
+     "kind": "direct",
+     "line": 6167
+    },
+    {
+     "target": "__srcu_check_read_flavor",
+     "kind": "direct",
+     "line": 6170
+    },
+    {
+     "target": "seq_buf_vprintf",
+     "kind": "direct",
+     "line": 6176
+    },
+    {
+     "target": "seq_buf_putc",
+     "kind": "direct",
+     "line": 6179
+    }
+   ]
+  },
+  "dump_newline": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 6148,
+   "end_line": 6155,
+   "depth": 2,
+   "events": [
+    {
+     "kind": "call",
+     "target": "__srcu_check_read_flavor",
+     "line": 6150
+    },
+    {
+     "kind": "call",
+     "target": "seq_buf_putc",
+     "line": 6154
+    }
+   ],
+   "callees": [
+    {
+     "target": "__srcu_check_read_flavor",
+     "kind": "direct",
+     "line": 6150
+    },
+    {
+     "target": "seq_buf_putc",
+     "kind": "direct",
+     "line": 6154
+    }
+   ]
+  },
+  "exit_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 4607,
+   "end_line": 4627,
+   "depth": 1,
+   "reads": [
+    "scx_dispatch_q.pcpu"
+   ],
+   "events": [
+    {
+     "kind": "warn",
+     "msg": "!list_empty(&dru->node)",
+     "line": 4620
+    },
+    {
+     "kind": "lock",
+     "lock": "deferred_reenq_lock",
+     "expr": "&rq->scx.deferred_reenq_lock",
+     "line": 4621
+    },
+    {
+     "kind": "unlock",
+     "lock": "deferred_reenq_lock",
+     "line": 4623
+    },
+    {
+     "kind": "call",
+     "target": "free_percpu",
+     "line": 4626
+    }
+   ],
+   "callees": [
+    {
+     "target": "free_percpu",
+     "kind": "direct",
+     "line": 4626
+    }
+   ]
+  },
+  "find_dsq_for_dispatch": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1735,
+   "end_line": 1764,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "dsq_id == SCX_DSQ_LOCAL",
+     "action": "return",
+     "line": 1741
+    },
+    {
+     "kind": "guard",
+     "cond": "(dsq_id & SCX_DSQ_LOCAL_ON) == SCX_DSQ_LOCAL_ON",
+     "action": "return",
+     "line": 1744
+    },
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 1747
+    },
+    {
+     "kind": "guard",
+     "cond": "!ops_cpu_valid(sch, cpu, \"in SCX_DSQ_LOCAL_ON dispatch verdict\")",
+     "action": "return",
+     "line": 1747
+    },
+    {
+     "kind": "call",
+     "target": "find_global_dsq",
+     "line": 1748
+    },
+    {
+     "kind": "call",
+     "target": "find_global_dsq",
+     "line": 1754
+    },
+    {
+     "kind": "call",
+     "target": "find_user_dsq",
+     "line": 1756
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!dsq)",
+     "action": "error",
+     "line": 1758
+    },
+    {
+     "kind": "error",
+     "msg": "non-existent DSQ 0x%llx",
+     "line": 1759
+    },
+    {
+     "kind": "call",
+     "target": "find_global_dsq",
+     "line": 1760
+    }
+   ],
+   "callees": [
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 1747
+    },
+    {
+     "target": "find_global_dsq",
+     "kind": "direct",
+     "line": 1748
+    },
+    {
+     "target": "find_global_dsq",
+     "kind": "direct",
+     "line": 1754
+    },
+    {
+     "target": "find_user_dsq",
+     "kind": "direct",
+     "line": 1756
+    },
+    {
+     "target": "find_global_dsq",
+     "kind": "direct",
+     "line": 1760
+    }
+   ]
+  },
+  "find_global_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 330,
+   "end_line": 333,
+   "depth": 2,
+   "events": [],
+   "callees": []
+  },
+  "find_user_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 335,
+   "end_line": 338,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "call",
+     "target": "rcu_read_lock_any_held",
+     "line": 337
+    },
+    {
+     "kind": "call",
+     "target": "rht_bucket_nested",
+     "line": 337
+    },
+    {
+     "kind": "call",
+     "target": "bcmp",
+     "line": 337
+    }
+   ],
+   "callees": [
+    {
+     "target": "bcmp",
+     "kind": "direct",
+     "line": 337
+    },
+    {
+     "target": "rcu_read_lock_any_held",
+     "kind": "direct",
+     "line": 337
+    },
+    {
+     "target": "rht_bucket_nested",
+     "kind": "direct",
+     "line": 337
+    }
+   ]
+  },
+  "finish_dispatch": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2681,
+   "end_line": 2747,
+   "depth": 2,
+   "reads": [
+    "scx_dispatch_q.id",
+    "task_struct.scx.flags",
+    "task_struct.scx.ops_state",
+    "task_struct.thread_info.cpu"
+   ],
+   "writes": [
+    "task_struct.scx.ops_state"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "touch_core_sched_dispatch",
+     "line": 2689
+    },
+    {
+     "kind": "atomic",
+     "field": "task_struct.scx.ops_state",
+     "op": "read",
+     "line": 2695
+    },
+    {
+     "kind": "guard",
+     "cond": "(opss & SCX_OPSS_QSEQ_MASK) != qseq_at_dispatch",
+     "action": "return",
+     "line": 2708
+    },
+    {
+     "kind": "call",
+     "target": "scx_task_on_sched",
+     "line": 2712
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!scx_task_on_sched(sch, p))",
+     "action": "return",
+     "line": 2712
+    },
+    {
+     "kind": "atomic",
+     "field": "task_struct.scx.ops_state",
+     "op": "cmpxchg",
+     "line": 2724
+    },
+    {
+     "kind": "guard",
+     "cond": "likely(atomic_long_try_cmpxchg(&p->scx.ops_state, &opss, SCX_OPSS_DISPATCHING))",
+     "action": "continue",
+     "line": 2724
+    },
+    {
+     "kind": "call",
+     "target": "wait_ops_state",
+     "line": 2735
+    },
+    {
+     "kind": "warn",
+     "msg": "!(p->scx.flags & SCX_TASK_QUEUED)",
+     "line": 2739
+    },
+    {
+     "kind": "call",
+     "target": "find_dsq_for_dispatch",
+     "line": 2741
+    },
+    {
+     "kind": "call",
+     "target": "__this_rq",
+     "line": 2741
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_to_local_dsq",
+     "line": 2744
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_enqueue",
+     "line": 2746
+    }
+   ],
+   "callees": [
+    {
+     "target": "touch_core_sched_dispatch",
+     "kind": "direct",
+     "line": 2689
+    },
+    {
+     "target": "scx_task_on_sched",
+     "kind": "direct",
+     "line": 2712
+    },
+    {
+     "target": "wait_ops_state",
+     "kind": "direct",
+     "line": 2735
+    },
+    {
+     "target": "__this_rq",
+     "kind": "direct",
+     "line": 2741
+    },
+    {
+     "target": "find_dsq_for_dispatch",
+     "kind": "direct",
+     "line": 2741
+    },
+    {
+     "target": "dispatch_to_local_dsq",
+     "kind": "direct",
+     "line": 2744
+    },
+    {
+     "target": "dispatch_enqueue",
+     "kind": "direct",
+     "line": 2746
+    }
+   ]
+  },
+  "flush_dispatch_buf": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2749,
+   "end_line": 2763,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "call",
+     "target": "finish_dispatch",
+     "line": 2757
+    }
+   ],
+   "callees": [
+    {
+     "target": "finish_dispatch",
+     "kind": "direct",
+     "line": 2757
+    }
+   ]
+  },
+  "free_percpu": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "idle_cpumask": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 60,
+   "end_line": 63,
+   "depth": 1,
+   "events": [],
+   "callees": []
+  },
+  "init_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 4581,
+   "end_line": 4605,
+   "depth": 1,
+   "reads": [
+    "scx_dispatch_q.pcpu"
+   ],
+   "writes": [
+    "scx_dispatch_q.id",
+    "scx_dispatch_q.list",
+    "scx_dispatch_q.pcpu",
+    "scx_dispatch_q.sched"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "__raw_spin_lock_init",
+     "line": 4588
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.list",
+     "op": "list_add",
+     "line": 4589
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.id",
+     "op": "set",
+     "line": 4590
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.sched",
+     "op": "set",
+     "line": 4591
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.pcpu",
+     "op": "set",
+     "line": 4593
+    },
+    {
+     "kind": "call",
+     "target": "pcpu_alloc_noprof",
+     "line": 4593
+    },
+    {
+     "kind": "guard",
+     "cond": "!dsq->pcpu",
+     "action": "return",
+     "line": 4594
+    }
+   ],
+   "callees": [
+    {
+     "target": "__raw_spin_lock_init",
+     "kind": "direct",
+     "line": 4588
+    },
+    {
+     "target": "pcpu_alloc_noprof",
+     "kind": "direct",
+     "line": 4593
+    }
+   ]
+  },
+  "irq_work_queue": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "irq_work_queue_on": {
+   "kind": "external",
+   "depth": 3,
+   "callees": []
+  },
+  "is_bpf_migration_disabled": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 902,
+   "end_line": 910,
+   "depth": 2,
+   "reads": [
+    "task_struct.migration_disabled"
+   ],
+   "events": [],
+   "callees": []
+  },
+  "is_migration_disabled": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1381,
+   "end_line": 1384,
+   "depth": 3,
+   "reads": [
+    "task_struct.migration_disabled"
+   ],
+   "events": [],
+   "callees": []
+  },
+  "jhash2": {
+   "kind": "boundary",
+   "file": "include/linux/jhash.h",
+   "line": 117,
+   "end_line": 146,
+   "depth": 1,
+   "callees": []
+  },
+  "kfree": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "llc_span": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 246,
+   "end_line": 255,
+   "depth": 3,
+   "events": [],
+   "callees": []
+  },
+  "local_dsq_post_enq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1458,
+   "end_line": 1516,
+   "depth": 3,
+   "reads": [
+    "rq.next_class",
+    "rq.scx.flags",
+    "task_struct.sched_class"
+   ],
+   "writes": [
+    "task_struct.scx.slice"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "call_task_dequeue",
+     "line": 1463
+    },
+    {
+     "kind": "call",
+     "target": "wakeup_preempt",
+     "line": 1498
+    },
+    {
+     "kind": "guard",
+     "cond": "rq->scx.flags & SCX_RQ_IN_BALANCE",
+     "action": "return",
+     "line": 1508
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.slice",
+     "op": "set",
+     "line": 1513
+    },
+    {
+     "kind": "call",
+     "target": "resched_curr",
+     "line": 1514
+    }
+   ],
+   "callees": [
+    {
+     "target": "call_task_dequeue",
+     "kind": "direct",
+     "line": 1463
+    },
+    {
+     "target": "wakeup_preempt",
+     "kind": "direct",
+     "line": 1498
+    },
+    {
+     "target": "resched_curr",
+     "kind": "direct",
+     "line": 1514
+    }
+   ]
+  },
+  "local_task_should_reenq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 4017,
+   "end_line": 4034,
+   "depth": 2,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "(p->scx.flags & SCX_TASK_IMMED) && (!first || !(*reenq_flags & SCX_REENQ_TSR_RQ_OPEN))",
+     "action": "return",
+     "line": 4026
+    },
+    {
+     "kind": "call",
+     "target": "scx_task_sched",
+     "line": 4028
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_task_sched",
+     "kind": "direct",
+     "line": 4028
+    }
+   ]
+  },
+  "mark_direct_dispatch": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1766,
+   "end_line": 1795,
+   "depth": 2,
+   "reads": [
+    "task_struct.pid",
+    "task_struct.scx.ddsp_dsq_id",
+    "task_struct.scx.ddsp_enq_flags"
+   ],
+   "writes": [
+    "task_struct.scx.ddsp_dsq_id",
+    "task_struct.scx.ddsp_enq_flags"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "unlikely(p != ddsp_task)",
+     "action": "return",
+     "line": 1779
+    },
+    {
+     "kind": "error",
+     "msg": "%s[%d] already direct-dispatched",
+     "line": 1781
+    },
+    {
+     "kind": "error",
+     "msg": "scheduling for %s[%d] but trying to direct-dispatch %s[%d]",
+     "line": 1784
+    },
+    {
+     "kind": "warn",
+     "msg": "p->scx.ddsp_dsq_id != SCX_DSQ_INVALID",
+     "line": 1790
+    },
+    {
+     "kind": "warn",
+     "msg": "p->scx.ddsp_enq_flags",
+     "line": 1791
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.ddsp_dsq_id",
+     "op": "set",
+     "line": 1793
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.ddsp_enq_flags",
+     "op": "set",
+     "line": 1794
+    }
+   ],
+   "callees": []
+  },
+  "move_local_task_to_local_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2248,
+   "end_line": 2270,
+   "depth": 2,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "rq.scx.local_dsq.list",
+    "task_struct.scx.holding_cpu"
+   ],
+   "writes": [
+    "task_struct.scx.dsq",
+    "task_struct.scx.dsq_list.node"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "dsq",
+     "expr": "&src_dsq->lock",
+     "line": 2256
+    },
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "dst_rq",
+     "line": 2257
+    },
+    {
+     "kind": "warn",
+     "msg": "p->scx.holding_cpu >= 0",
+     "line": 2259
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_list.node",
+     "op": "set",
+     "line": 2262
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_list.node",
+     "op": "set",
+     "line": 2264
+    },
+    {
+     "kind": "call",
+     "target": "dsq_inc_nr",
+     "line": 2266
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq",
+     "op": "set",
+     "line": 2267
+    },
+    {
+     "kind": "call",
+     "target": "local_dsq_post_enq",
+     "line": 2269
+    }
+   ],
+   "callees": [
+    {
+     "target": "dsq_inc_nr",
+     "kind": "direct",
+     "line": 2266
+    },
+    {
+     "target": "local_dsq_post_enq",
+     "kind": "direct",
+     "line": 2269
+    }
+   ]
+  },
+  "move_remote_task_to_local_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2281,
+   "end_line": 2307,
+   "depth": 3,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "rq.scx.extra_enq_flags",
+    "task_struct.cpus_ptr"
+   ],
+   "writes": [
+    "rq.scx.extra_enq_flags",
+    "task_struct.scx.sticky_cpu"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "src_rq",
+     "line": 2284
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.sticky_cpu",
+     "op": "set",
+     "line": 2290
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 2290
+    },
+    {
+     "kind": "call",
+     "target": "deactivate_task",
+     "line": 2291
+    },
+    {
+     "kind": "call",
+     "target": "set_task_cpu",
+     "line": 2292
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 2292
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "src_rq",
+     "line": 2294
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "dst_rq",
+     "line": 2295
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 2302
+    },
+    {
+     "kind": "warn",
+     "msg": "!cpumask_test_cpu(cpu_of(dst_rq), p->cpus_ptr)",
+     "line": 2302
+    },
+    {
+     "kind": "warn",
+     "msg": "dst_rq->scx.extra_enq_flags",
+     "line": 2303
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.extra_enq_flags",
+     "op": "set",
+     "line": 2304
+    },
+    {
+     "kind": "call",
+     "target": "activate_task",
+     "line": 2305
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.extra_enq_flags",
+     "op": "set",
+     "line": 2306
+    }
+   ],
+   "callees": [
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 2290
+    },
+    {
+     "target": "deactivate_task",
+     "kind": "direct",
+     "line": 2291
+    },
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 2292
+    },
+    {
+     "target": "set_task_cpu",
+     "kind": "direct",
+     "line": 2292
+    },
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 2302
+    },
+    {
+     "target": "activate_task",
+     "kind": "direct",
+     "line": 2305
+    }
+   ]
+  },
+  "move_task_between_dsqs": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2458,
+   "end_line": 2510,
+   "depth": 2,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "scx_dispatch_q.id",
+    "task_struct.thread_info.cpu"
+   ],
+   "events": [
+    {
+     "kind": "warn",
+     "msg": "src_dsq->id == SCX_DSQ_LOCAL",
+     "line": 2465
+    },
+    {
+     "kind": "assert_held",
+     "lock": "dsq",
+     "expr": "&src_dsq->lock",
+     "line": 2466
+    },
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "src_rq",
+     "line": 2467
+    },
+    {
+     "kind": "call",
+     "target": "task_can_run_on_remote_rq",
+     "line": 2472
+    },
+    {
+     "kind": "call",
+     "target": "find_global_dsq",
+     "line": 2473
+    },
+    {
+     "kind": "call",
+     "target": "task_unlink_from_dsq",
+     "line": 2489
+    },
+    {
+     "kind": "call",
+     "target": "move_local_task_to_local_dsq",
+     "line": 2490
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&src_dsq->lock",
+     "line": 2492
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&src_dsq->lock",
+     "line": 2494
+    },
+    {
+     "kind": "call",
+     "target": "move_remote_task_to_local_dsq",
+     "line": 2495
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_dequeue_locked",
+     "line": 2503
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&src_dsq->lock",
+     "line": 2504
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_enqueue",
+     "line": 2506
+    }
+   ],
+   "callees": [
+    {
+     "target": "task_can_run_on_remote_rq",
+     "kind": "direct",
+     "line": 2472
+    },
+    {
+     "target": "find_global_dsq",
+     "kind": "direct",
+     "line": 2473
+    },
+    {
+     "target": "task_unlink_from_dsq",
+     "kind": "direct",
+     "line": 2489
+    },
+    {
+     "target": "move_local_task_to_local_dsq",
+     "kind": "direct",
+     "line": 2490
+    },
+    {
+     "target": "move_remote_task_to_local_dsq",
+     "kind": "direct",
+     "line": 2495
+    },
+    {
+     "target": "dispatch_dequeue_locked",
+     "kind": "direct",
+     "line": 2503
+    },
+    {
+     "target": "dispatch_enqueue",
+     "kind": "direct",
+     "line": 2506
+    }
+   ]
+  },
+  "nearest_node_nodemask": {
+   "kind": "external",
+   "depth": 3,
+   "callees": []
+  },
+  "nldsq_cursor_lost_task": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 673,
+   "end_line": 694,
+   "depth": 2,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "task_struct.scx.dsq",
+    "task_struct.scx.dsq_seq",
+    "task_struct.scx.holding_cpu",
+    "task_struct.thread_info.cpu"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 677
+    },
+    {
+     "kind": "assert_held",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 678
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(p->scx.dsq != dsq || u32_before(cursor->priv, p->scx.dsq_seq) || p->scx.holding_cpu >= 0)",
+     "action": "return",
+     "line": 684
+    },
+    {
+     "kind": "call",
+     "target": "u32_before",
+     "line": 684
+    },
+    {
+     "kind": "guard",
+     "cond": "WARN_ON_ONCE(rq != task_rq(p))",
+     "action": "return",
+     "line": 690
+    },
+    {
+     "kind": "warn",
+     "msg": "rq != task_rq(p)",
+     "line": 690
+    }
+   ],
+   "callees": [
+    {
+     "target": "u32_before",
+     "kind": "direct",
+     "line": 684
+    }
+   ]
+  },
+  "nldsq_cursor_next_task": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 629,
+   "end_line": 658,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 635
+    },
+    {
+     "kind": "warn",
+     "msg": "!(cursor->flags & SCX_DSQ_LNODE_ITER_CURSOR)",
+     "line": 636
+    },
+    {
+     "kind": "call",
+     "target": "nldsq_next_task",
+     "line": 645
+    },
+    {
+     "kind": "call",
+     "target": "u32_before",
+     "line": 646
+    }
+   ],
+   "callees": [
+    {
+     "target": "nldsq_next_task",
+     "kind": "direct",
+     "line": 645
+    },
+    {
+     "target": "u32_before",
+     "kind": "direct",
+     "line": 646
+    }
+   ]
+  },
+  "nldsq_next_task": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 582,
+   "end_line": 610,
+   "depth": 2,
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 588
+    },
+    {
+     "kind": "assert_held",
+     "lock": "lock",
+     "expr": "&dsq->lock",
+     "line": 588
+    },
+    {
+     "kind": "guard",
+     "cond": "list_node == &dsq->list",
+     "action": "return",
+     "line": 602
+    }
+   ],
+   "callees": []
+  },
+  "numa_span": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 280,
+   "end_line": 293,
+   "depth": 3,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "!sd",
+     "action": "return",
+     "line": 286
+    }
+   ],
+   "callees": []
+  },
+  "ops_cpu_valid": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1098,
+   "end_line": 1106,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "call",
+     "target": "__cpu_valid",
+     "line": 1100
+    },
+    {
+     "kind": "guard",
+     "cond": "__cpu_valid(cpu)",
+     "action": "return",
+     "line": 1100
+    },
+    {
+     "kind": "error",
+     "msg": "invalid CPU %d%s%s",
+     "line": 1103
+    }
+   ],
+   "callees": [
+    {
+     "target": "__cpu_valid",
+     "kind": "direct",
+     "line": 1100
+    }
+   ]
+  },
+  "ops_dump_flush": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 6205,
+   "end_line": 6251,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "!dd->cursor",
+     "action": "return",
+     "line": 6210
+    },
+    {
+     "kind": "call",
+     "target": "dump_newline",
+     "line": 6218
+    },
+    {
+     "kind": "call",
+     "target": "dump_line",
+     "line": 6239
+    },
+    {
+     "kind": "guard",
+     "cond": "c == '\\0'",
+     "action": "continue",
+     "line": 6240
+    }
+   ],
+   "callees": [
+    {
+     "target": "dump_newline",
+     "kind": "direct",
+     "line": 6218
+    },
+    {
+     "target": "dump_line",
+     "kind": "direct",
+     "line": 6239
+    }
+   ]
+  },
+  "pcpu_alloc_noprof": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "pick_idle_cpu_from_online_nodes": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 150,
+   "end_line": 188,
+   "depth": 2,
+   "events": [
+    {
+     "kind": "call",
+     "target": "nearest_node_nodemask",
+     "line": 180
+    },
+    {
+     "kind": "call",
+     "target": "pick_idle_cpu_in_node",
+     "line": 181
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu >= 0",
+     "action": "continue",
+     "line": 182
+    }
+   ],
+   "callees": [
+    {
+     "target": "nearest_node_nodemask",
+     "kind": "direct",
+     "line": 180
+    },
+    {
+     "target": "pick_idle_cpu_in_node",
+     "kind": "direct",
+     "line": 181
+    }
+   ]
+  },
+  "pick_idle_cpu_in_node": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 115,
+   "end_line": 138,
+   "depth": 2,
+   "events": [
+    {
+     "kind": "call",
+     "target": "cpumask_any_and_distribute",
+     "line": 121
+    },
+    {
+     "kind": "call",
+     "target": "idle_cpumask",
+     "line": 121
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu < nr_cpu_ids",
+     "action": "continue",
+     "line": 122
+    },
+    {
+     "kind": "guard",
+     "cond": "flags & SCX_PICK_IDLE_CORE",
+     "action": "return",
+     "line": 125
+    },
+    {
+     "kind": "call",
+     "target": "cpumask_any_and_distribute",
+     "line": 129
+    },
+    {
+     "kind": "call",
+     "target": "idle_cpumask",
+     "line": 129
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu >= nr_cpu_ids",
+     "action": "return",
+     "line": 130
+    },
+    {
+     "kind": "call",
+     "target": "scx_idle_test_and_clear_cpu",
+     "line": 134
+    },
+    {
+     "kind": "guard",
+     "cond": "scx_idle_test_and_clear_cpu(cpu)",
+     "action": "return",
+     "line": 134
+    }
+   ],
+   "callees": [
+    {
+     "target": "cpumask_any_and_distribute",
+     "kind": "direct",
+     "line": 121
+    },
+    {
+     "target": "idle_cpumask",
+     "kind": "direct",
+     "line": 121
+    },
+    {
+     "target": "cpumask_any_and_distribute",
+     "kind": "direct",
+     "line": 129
+    },
+    {
+     "target": "idle_cpumask",
+     "kind": "direct",
+     "line": 129
+    },
+    {
+     "target": "scx_idle_test_and_clear_cpu",
+     "kind": "direct",
+     "line": 134
+    }
+   ]
+  },
+  "queue_work_on": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "raw_spin_rq_lock": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1621,
+   "end_line": 1625,
+   "depth": 3,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "raw_spin_rq_lock_nested",
+     "line": 1624
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 1624
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 1624
+    }
+   ],
+   "callees": [
+    {
+     "target": "raw_spin_rq_lock_nested",
+     "kind": "direct",
+     "line": 1624
+    }
+   ]
+  },
+  "raw_spin_rq_lock_nested": {
+   "kind": "boundary",
+   "file": "kernel/sched/core.c",
+   "line": 644,
+   "end_line": 668,
+   "depth": 4,
+   "callees": []
+  },
+  "rb_add": {
+   "kind": "boundary",
+   "file": "include/linux/rbtree.h",
+   "line": 298,
+   "end_line": 302,
+   "depth": 4,
+   "callees": []
+  },
+  "rb_erase": {
+   "kind": "external",
+   "depth": 3,
+   "callees": []
+  },
+  "rb_insert_color": {
+   "kind": "external",
+   "depth": 4,
+   "callees": []
+  },
+  "rb_prev": {
+   "kind": "external",
+   "depth": 4,
+   "callees": []
+  },
+  "rcu_read_lock_any_held": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "rcu_read_lock_sched_held": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "reenq_local": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 4036,
+   "end_line": 4098,
+   "depth": 1,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "rq.scx.local_dsq.list",
+    "task_struct.thread_info.flags",
+    "task_struct.wake_entry.llist"
+   ],
+   "writes": [
+    "task_struct.thread_info.flags",
+    "task_struct.wake_entry.llist"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 4042
+    },
+    {
+     "kind": "warn",
+     "msg": "reenq_flags & __SCX_REENQ_TSR_MASK",
+     "line": 4044
+    },
+    {
+     "kind": "call",
+     "target": "rq_is_open",
+     "line": 4046
+    },
+    {
+     "kind": "call",
+     "target": "scx_task_sched",
+     "line": 4056
+    },
+    {
+     "kind": "guard",
+     "cond": "p->migration_pending",
+     "action": "continue",
+     "line": 4070
+    },
+    {
+     "kind": "guard",
+     "cond": "!scx_is_descendant(task_sch, sch)",
+     "action": "continue",
+     "line": 4073
+    },
+    {
+     "kind": "call",
+     "target": "scx_is_descendant",
+     "line": 4073
+    },
+    {
+     "kind": "guard",
+     "cond": "!local_task_should_reenq(p, &reenq_flags, &reason)",
+     "action": "continue",
+     "line": 4076
+    },
+    {
+     "kind": "call",
+     "target": "local_task_should_reenq",
+     "line": 4076
+    },
+    {
+     "kind": "call",
+     "target": "dispatch_dequeue",
+     "line": 4079
+    },
+    {
+     "kind": "warn",
+     "msg": "p->scx.flags & SCX_TASK_REENQ_REASON_MASK",
+     "line": 4081
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.thread_info.flags",
+     "op": "list_del",
+     "line": 4089
+    },
+    {
+     "kind": "call",
+     "target": "do_enqueue_task",
+     "line": 4091
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.wake_entry.llist",
+     "op": "set",
+     "line": 4093
+    }
+   ],
+   "callees": [
+    {
+     "target": "rq_is_open",
+     "kind": "direct",
+     "line": 4046
+    },
+    {
+     "target": "scx_task_sched",
+     "kind": "direct",
+     "line": 4056
+    },
+    {
+     "target": "scx_is_descendant",
+     "kind": "direct",
+     "line": 4073
+    },
+    {
+     "target": "local_task_should_reenq",
+     "kind": "direct",
+     "line": 4076
+    },
+    {
+     "target": "dispatch_dequeue",
+     "kind": "direct",
+     "line": 4079
+    },
+    {
+     "target": "do_enqueue_task",
+     "kind": "direct",
+     "line": 4091
+    }
+   ]
+  },
+  "refill_task_slice_dfl": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1421,
+   "end_line": 1425,
+   "depth": 3,
+   "writes": [
+    "task_struct.scx.slice"
+   ],
+   "events": [
+    {
+     "kind": "write",
+     "field": "task_struct.scx.slice",
+     "op": "set",
+     "line": 1423
+    }
+   ],
+   "callees": []
+  },
+  "resched_curr": {
+   "kind": "boundary",
+   "file": "kernel/sched/core.c",
+   "line": 1212,
+   "end_line": 1215,
+   "depth": 4,
+   "callees": []
+  },
+  "rhashtable_insert_slow": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "rht_bucket_nested": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "rht_bucket_nested_insert": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "rq_clock": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1772,
+   "end_line": 1778,
+   "depth": 2,
+   "events": [
+    {
+     "kind": "call",
+     "target": "assert_clock_updated",
+     "line": 1775
+    }
+   ],
+   "callees": [
+    {
+     "target": "assert_clock_updated",
+     "kind": "direct",
+     "line": 1775
+    }
+   ]
+  },
+  "rq_is_open": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 404,
+   "end_line": 448,
+   "depth": 2,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "rq.next_class",
+    "rq.scx.flags"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 406
+    },
+    {
+     "kind": "guard",
+     "cond": "sched_class_above(rq->next_class, &ext_sched_class)",
+     "action": "return",
+     "line": 412
+    },
+    {
+     "kind": "guard",
+     "cond": "sched_class_above(&ext_sched_class, rq->next_class)",
+     "action": "return",
+     "line": 419
+    },
+    {
+     "kind": "guard",
+     "cond": "rq->scx.flags & SCX_RQ_IN_BALANCE",
+     "action": "return",
+     "line": 432
+    }
+   ],
+   "callees": []
+  },
+  "rq_lock_irqsave": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1951,
+   "end_line": 1956,
+   "depth": 1,
+   "reads": [
+    "rq.clock_update_flags",
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "writes": [
+    "rq.clock_update_flags"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "_raw_spin_rq_lock_irqsave",
+     "line": 1954
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 1954
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 1954
+    },
+    {
+     "kind": "call",
+     "target": "rq_pin_lock",
+     "line": 1955
+    },
+    {
+     "kind": "write",
+     "field": "rq.clock_update_flags",
+     "op": "set",
+     "line": 1955
+    }
+   ],
+   "callees": [
+    {
+     "target": "_raw_spin_rq_lock_irqsave",
+     "kind": "direct",
+     "line": 1954
+    },
+    {
+     "target": "rq_pin_lock",
+     "kind": "direct",
+     "line": 1955
+    }
+   ]
+  },
+  "rq_pin_lock": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1888,
+   "end_line": 1895,
+   "depth": 2,
+   "events": [
+    {
+     "kind": "call",
+     "target": "assert_balance_callbacks_empty",
+     "line": 1894
+    }
+   ],
+   "callees": [
+    {
+     "target": "assert_balance_callbacks_empty",
+     "kind": "direct",
+     "line": 1894
+    }
+   ]
+  },
+  "rq_unlock_irqrestore": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1972,
+   "end_line": 1977,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "call",
+     "target": "rq_unpin_lock",
+     "line": 1975
+    }
+   ],
+   "callees": [
+    {
+     "target": "rq_unpin_lock",
+     "kind": "direct",
+     "line": 1975
+    }
+   ]
+  },
+  "rq_unpin_lock": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1897,
+   "end_line": 1904,
+   "depth": 2,
+   "reads": [
+    "rq.clock_update_flags",
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "rq->clock_update_flags > RQCF_ACT_SKIP",
+     "action": "fallback",
+     "line": 1899
+    },
+    {
+     "kind": "call",
+     "target": "scx_rq_clock_invalidate",
+     "line": 1902
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_rq_clock_invalidate",
+     "kind": "direct",
+     "line": 1902
+    }
+   ]
+  },
+  "sched_clock_cpu": {
+   "kind": "external",
+   "depth": 1,
+   "callees": []
+  },
+  "sched_core_disabled": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1449,
+   "end_line": 1452,
+   "depth": 4,
+   "events": [],
+   "callees": []
+  },
+  "schedule_deferred": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1152,
+   "end_line": 1167,
+   "depth": 2,
+   "events": [
+    {
+     "kind": "call",
+     "target": "irq_work_queue_on",
+     "line": 1166
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 1166
+    }
+   ],
+   "callees": [
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 1166
+    },
+    {
+     "target": "irq_work_queue_on",
+     "kind": "direct",
+     "line": 1166
+    }
+   ]
+  },
+  "schedule_deferred_locked": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1176,
+   "end_line": 1214,
+   "depth": 2,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "rq.scx.flags"
+   ],
+   "writes": [
+    "rq.scx.flags"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 1178
+    },
+    {
+     "kind": "guard",
+     "cond": "rq->scx.flags & SCX_RQ_IN_WAKEUP",
+     "action": "return",
+     "line": 1185
+    },
+    {
+     "kind": "guard",
+     "cond": "rq->scx.flags & SCX_RQ_IN_BALANCE",
+     "action": "return",
+     "line": 1203
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.flags",
+     "op": "set",
+     "line": 1204
+    },
+    {
+     "kind": "call",
+     "target": "schedule_deferred",
+     "line": 1213
+    }
+   ],
+   "callees": [
+    {
+     "target": "schedule_deferred",
+     "kind": "direct",
+     "line": 1213
+    }
+   ]
+  },
+  "schedule_dsq_reenq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1216,
+   "end_line": 1279,
+   "depth": 1,
+   "reads": [
+    "rq.scx.deferred_reenq_locals",
+    "rq.scx.deferred_reenq_users",
+    "scx_dispatch_q.id",
+    "scx_dispatch_q.pcpu"
+   ],
+   "writes": [
+    "rq.scx.deferred_reenq_locals",
+    "rq.scx.deferred_reenq_users"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "unlikely(READ_ONCE(sch->bypass_depth))",
+     "action": "return",
+     "line": 1225
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 1231
+    },
+    {
+     "kind": "lock",
+     "lock": "deferred_reenq_lock",
+     "expr": "&rq->scx.deferred_reenq_lock",
+     "line": 1243
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.deferred_reenq_locals",
+     "op": "list_add",
+     "line": 1246
+    },
+    {
+     "kind": "unlock",
+     "lock": "deferred_reenq_lock",
+     "line": 1248
+    },
+    {
+     "kind": "call",
+     "target": "__this_rq",
+     "line": 1250
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 1252
+    },
+    {
+     "kind": "lock",
+     "lock": "deferred_reenq_lock",
+     "expr": "&rq->scx.deferred_reenq_lock",
+     "line": 1264
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.deferred_reenq_users",
+     "op": "list_add",
+     "line": 1267
+    },
+    {
+     "kind": "unlock",
+     "lock": "deferred_reenq_lock",
+     "line": 1269
+    },
+    {
+     "kind": "error",
+     "msg": "DSQ 0x%llx not allowed for reenq",
+     "line": 1271
+    },
+    {
+     "kind": "call",
+     "target": "schedule_deferred_locked",
+     "line": 1276
+    },
+    {
+     "kind": "call",
+     "target": "schedule_deferred",
+     "line": 1278
+    }
+   ],
+   "callees": [
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 1231
+    },
+    {
+     "target": "__this_rq",
+     "kind": "direct",
+     "line": 1250
+    },
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 1252
+    },
+    {
+     "target": "schedule_deferred_locked",
+     "kind": "direct",
+     "line": 1276
+    },
+    {
+     "target": "schedule_deferred",
+     "kind": "direct",
+     "line": 1278
+    }
+   ]
+  },
+  "schedule_reenq_local": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1281,
+   "end_line": 1289,
+   "depth": 4,
+   "events": [
+    {
+     "kind": "call",
+     "target": "rcu_read_lock_sched_held",
+     "line": 1283
+    },
+    {
+     "kind": "guard",
+     "cond": "WARN_ON_ONCE(!root)",
+     "action": "return",
+     "line": 1285
+    },
+    {
+     "kind": "warn",
+     "msg": "!root",
+     "line": 1285
+    },
+    {
+     "kind": "call",
+     "target": "schedule_dsq_reenq",
+     "line": 1288
+    }
+   ],
+   "callees": [
+    {
+     "target": "rcu_read_lock_sched_held",
+     "kind": "direct",
+     "line": 1283
+    },
+    {
+     "target": "schedule_dsq_reenq",
+     "kind": "direct",
+     "line": 1288
+    }
+   ]
+  },
+  "scx_bpf_cpu_curr": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9596,
+   "end_line": 9610,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9602
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 9603
+    },
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 9606
+    },
+    {
+     "kind": "guard",
+     "cond": "!ops_cpu_valid(sch, cpu, NULL)",
+     "action": "return",
+     "line": 9606
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9602
+    },
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 9606
+    }
+   ]
+  },
+  "scx_bpf_cpu_node": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 986,
+   "end_line": 996,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 992
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch) || !ops_cpu_valid(sch, cpu, NULL)",
+     "action": "return",
+     "line": 993
+    },
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 993
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 992
+    },
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 993
+    }
+   ]
+  },
+  "scx_bpf_cpu_rq": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9539,
+   "end_line": 9560,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9545
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 9546
+    },
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 9549
+    },
+    {
+     "kind": "guard",
+     "cond": "!ops_cpu_valid(sch, cpu, NULL)",
+     "action": "return",
+     "line": 9549
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9545
+    },
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 9549
+    }
+   ]
+  },
+  "scx_bpf_cpuperf_cap": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9365,
+   "end_line": 9376,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9371
+    },
+    {
+     "kind": "guard",
+     "cond": "likely(sch) && ops_cpu_valid(sch, cpu, NULL)",
+     "action": "return",
+     "line": 9372
+    },
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 9372
+    },
+    {
+     "kind": "call",
+     "target": "arch_scale_cpu_capacity",
+     "line": 9373
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9371
+    },
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 9372
+    },
+    {
+     "target": "arch_scale_cpu_capacity",
+     "kind": "direct",
+     "line": 9373
+    }
+   ]
+  },
+  "scx_bpf_cpuperf_cur": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9393,
+   "end_line": 9404,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9399
+    },
+    {
+     "kind": "guard",
+     "cond": "likely(sch) && ops_cpu_valid(sch, cpu, NULL)",
+     "action": "return",
+     "line": 9400
+    },
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 9400
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9399
+    },
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 9400
+    }
+   ]
+  },
+  "scx_bpf_cpuperf_set": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9421,
+   "end_line": 9464,
+   "depth": 0,
+   "reads": [
+    "rq.clock_update_flags",
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "writes": [
+    "rq.clock_update_flags",
+    "rq.scx.cpuperf_target"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9427
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 9428
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(perf > SCX_CPUPERF_ONE)",
+     "action": "error",
+     "line": 9431
+    },
+    {
+     "kind": "error",
+     "msg": "Invalid cpuperf target %u for CPU %d",
+     "line": 9432
+    },
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 9436
+    },
+    {
+     "kind": "call",
+     "target": "scx_locked_rq",
+     "line": 9437
+    },
+    {
+     "kind": "guard",
+     "cond": "locked_rq && rq != locked_rq",
+     "action": "error",
+     "line": 9444
+    },
+    {
+     "kind": "error",
+     "msg": "Invalid target CPU %d",
+     "line": 9445
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 9454
+    },
+    {
+     "kind": "write",
+     "field": "rq.clock_update_flags",
+     "op": "set",
+     "line": 9454
+    },
+    {
+     "kind": "call",
+     "target": "rq_lock_irqsave",
+     "line": 9454
+    },
+    {
+     "kind": "call",
+     "target": "update_rq_clock",
+     "line": 9455
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.cpuperf_target",
+     "op": "set",
+     "line": 9458
+    },
+    {
+     "kind": "call",
+     "target": "cpufreq_update_util",
+     "line": 9459
+    },
+    {
+     "kind": "call",
+     "target": "rq_unlock_irqrestore",
+     "line": 9462
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 9462
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9427
+    },
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 9436
+    },
+    {
+     "target": "scx_locked_rq",
+     "kind": "direct",
+     "line": 9437
+    },
+    {
+     "target": "rq_lock_irqsave",
+     "kind": "direct",
+     "line": 9454
+    },
+    {
+     "target": "update_rq_clock",
+     "kind": "direct",
+     "line": 9455
+    },
+    {
+     "target": "cpufreq_update_util",
+     "kind": "direct",
+     "line": 9459
+    },
+    {
+     "target": "rq_unlock_irqrestore",
+     "kind": "direct",
+     "line": 9462
+    }
+   ]
+  },
+  "scx_bpf_create_dsq": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8766,
+   "end_line": 8810,
+   "depth": 0,
+   "writes": [
+    "scx_dispatch_q.hash_node",
+    "scx_dispatch_q.sched"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "unlikely(node >= (int)nr_node_ids || (node < 0 && node != NUMA_NO_NODE))",
+     "action": "return",
+     "line": 8772
+    },
+    {
+     "kind": "call",
+     "target": "__kmalloc_cache_node_noprof",
+     "line": 8779
+    },
+    {
+     "kind": "guard",
+     "cond": "!dsq",
+     "action": "return",
+     "line": 8780
+    },
+    {
+     "kind": "call",
+     "target": "init_dsq",
+     "line": 8787
+    },
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8795
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.sched",
+     "op": "set",
+     "line": 8797
+    },
+    {
+     "kind": "warn",
+     "line": 8798
+    },
+    {
+     "kind": "call",
+     "target": "rcu_read_lock_any_held",
+     "line": 8798
+    },
+    {
+     "kind": "call",
+     "target": "jhash2",
+     "line": 8798
+    },
+    {
+     "kind": "call",
+     "target": "rht_bucket_nested_insert",
+     "line": 8798
+    },
+    {
+     "kind": "call",
+     "target": "rhashtable_insert_slow",
+     "line": 8798
+    },
+    {
+     "kind": "call",
+     "target": "bcmp",
+     "line": 8798
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.hash_node",
+     "op": "write_once",
+     "line": 8798
+    },
+    {
+     "kind": "call",
+     "target": "irq_work_queue",
+     "line": 8798
+    },
+    {
+     "kind": "call",
+     "target": "exit_dsq",
+     "line": 8806
+    },
+    {
+     "kind": "call",
+     "target": "kfree"
+    }
+   ],
+   "callees": [
+    {
+     "target": "kfree",
+     "kind": "direct"
+    },
+    {
+     "target": "__kmalloc_cache_node_noprof",
+     "kind": "direct",
+     "line": 8779
+    },
+    {
+     "target": "init_dsq",
+     "kind": "direct",
+     "line": 8787
+    },
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8795
+    },
+    {
+     "target": "bcmp",
+     "kind": "direct",
+     "line": 8798
+    },
+    {
+     "target": "irq_work_queue",
+     "kind": "direct",
+     "line": 8798
+    },
+    {
+     "target": "jhash2",
+     "kind": "direct",
+     "line": 8798
+    },
+    {
+     "target": "rcu_read_lock_any_held",
+     "kind": "direct",
+     "line": 8798
+    },
+    {
+     "target": "rhashtable_insert_slow",
+     "kind": "direct",
+     "line": 8798
+    },
+    {
+     "target": "rht_bucket_nested_insert",
+     "kind": "direct",
+     "line": 8798
+    },
+    {
+     "target": "exit_dsq",
+     "kind": "direct",
+     "line": 8806
+    }
+   ]
+  },
+  "scx_bpf_destroy_dsq": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9010,
+   "end_line": 9018,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9015
+    },
+    {
+     "kind": "call",
+     "target": "destroy_dsq",
+     "line": 9017
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9015
+    },
+    {
+     "target": "destroy_dsq",
+     "kind": "direct",
+     "line": 9017
+    }
+   ]
+  },
+  "scx_bpf_dispatch_cancel": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8468,
+   "end_line": 8485,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8475
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 8476
+    },
+    {
+     "kind": "error",
+     "msg": "dispatch buffer underflow",
+     "line": 8484
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8475
+    }
+   ]
+  },
+  "scx_bpf_dispatch_nr_slots": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8448,
+   "end_line": 8459,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8454
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 8455
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8454
+    }
+   ]
+  },
+  "scx_bpf_dsq_insert": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8220,
+   "end_line": 8225,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_bpf_dsq_insert___v2",
+     "line": 8224
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_bpf_dsq_insert___v2",
+     "kind": "direct",
+     "line": 8224
+    }
+   ]
+  },
+  "scx_bpf_dsq_insert___v2": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8193,
+   "end_line": 8215,
+   "depth": 0,
+   "reads": [
+    "task_struct.scx.slice"
+   ],
+   "writes": [
+    "task_struct.scx.slice"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8200
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 8201
+    },
+    {
+     "kind": "guard",
+     "cond": "!scx_dsq_insert_preamble(sch, p, dsq_id, &enq_flags)",
+     "action": "return",
+     "line": 8204
+    },
+    {
+     "kind": "call",
+     "target": "scx_dsq_insert_preamble",
+     "line": 8204
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.slice",
+     "op": "set",
+     "line": 8208
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.slice",
+     "op": "set",
+     "line": 8210
+    },
+    {
+     "kind": "call",
+     "target": "scx_dsq_insert_commit",
+     "line": 8212
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8200
+    },
+    {
+     "target": "scx_dsq_insert_preamble",
+     "kind": "direct",
+     "line": 8204
+    },
+    {
+     "target": "scx_dsq_insert_commit",
+     "kind": "direct",
+     "line": 8212
+    }
+   ]
+  },
+  "scx_bpf_dsq_insert_vtime": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8304,
+   "end_line": 8327,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 8312
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!list_empty(&sch->children))",
+     "action": "error",
+     "line": 8320
+    },
+    {
+     "kind": "call",
+     "target": "scx_task_sched",
+     "line": 8321
+    },
+    {
+     "kind": "error",
+     "msg": "__scx_bpf_dsq_insert_vtime() must be used",
+     "line": 8321
+    },
+    {
+     "kind": "call",
+     "target": "scx_dsq_insert_vtime",
+     "line": 8326
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_task_sched",
+     "kind": "direct",
+     "line": 8321
+    },
+    {
+     "target": "scx_dsq_insert_vtime",
+     "kind": "direct",
+     "line": 8326
+    }
+   ]
+  },
+  "scx_bpf_dsq_move": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8622,
+   "end_line": 8628,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_dsq_move",
+     "line": 8626
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_dsq_move",
+     "kind": "direct",
+     "line": 8626
+    }
+   ]
+  },
+  "scx_bpf_dsq_move_set_slice": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8569,
+   "end_line": 8576,
+   "depth": 0,
+   "events": [],
+   "callees": []
+  },
+  "scx_bpf_dsq_move_set_vtime": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8588,
+   "end_line": 8595,
+   "depth": 0,
+   "events": [],
+   "callees": []
+  },
+  "scx_bpf_dsq_move_to_local": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8555,
+   "end_line": 8558,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_bpf_dsq_move_to_local___v2",
+     "line": 8557
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_bpf_dsq_move_to_local___v2",
+     "kind": "direct",
+     "line": 8557
+    }
+   ]
+  },
+  "scx_bpf_dsq_move_to_local___v2": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8512,
+   "end_line": 8550,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8521
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 8522
+    },
+    {
+     "kind": "call",
+     "target": "scx_vet_enq_flags",
+     "line": 8525
+    },
+    {
+     "kind": "guard",
+     "cond": "!scx_vet_enq_flags(sch, SCX_DSQ_LOCAL, &enq_flags)",
+     "action": "return",
+     "line": 8525
+    },
+    {
+     "kind": "call",
+     "target": "flush_dispatch_buf",
+     "line": 8530
+    },
+    {
+     "kind": "call",
+     "target": "find_user_dsq",
+     "line": 8532
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!dsq)",
+     "action": "error",
+     "line": 8533
+    },
+    {
+     "kind": "error",
+     "msg": "invalid DSQ ID 0x%016llx",
+     "line": 8534
+    },
+    {
+     "kind": "call",
+     "target": "consume_dispatch_q",
+     "line": 8538
+    },
+    {
+     "kind": "guard",
+     "cond": "consume_dispatch_q(sch, dspc->rq, dsq, enq_flags)",
+     "action": "return",
+     "line": 8538
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8521
+    },
+    {
+     "target": "scx_vet_enq_flags",
+     "kind": "direct",
+     "line": 8525
+    },
+    {
+     "target": "flush_dispatch_buf",
+     "kind": "direct",
+     "line": 8530
+    },
+    {
+     "target": "find_user_dsq",
+     "kind": "direct",
+     "line": 8532
+    },
+    {
+     "target": "consume_dispatch_q",
+     "kind": "direct",
+     "line": 8538
+    }
+   ]
+  },
+  "scx_bpf_dsq_move_vtime": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8647,
+   "end_line": 8653,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_dsq_move",
+     "line": 8651
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_dsq_move",
+     "kind": "direct",
+     "line": 8651
+    }
+   ]
+  },
+  "scx_bpf_dsq_nr_queued": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8963,
+   "end_line": 8998,
+   "depth": 0,
+   "reads": [
+    "rq.scx.local_dsq.nr",
+    "scx_dispatch_q.nr"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8971
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "continue",
+     "line": 8972
+    },
+    {
+     "kind": "guard",
+     "cond": "dsq_id == SCX_DSQ_LOCAL",
+     "action": "continue",
+     "line": 8977
+    },
+    {
+     "kind": "call",
+     "target": "__this_rq",
+     "line": 8978
+    },
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 8983
+    },
+    {
+     "kind": "guard",
+     "cond": "ops_cpu_valid(sch, cpu, NULL)",
+     "action": "continue",
+     "line": 8983
+    },
+    {
+     "kind": "call",
+     "target": "find_user_dsq",
+     "line": 8988
+    },
+    {
+     "kind": "guard",
+     "cond": "dsq",
+     "action": "continue",
+     "line": 8989
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8971
+    },
+    {
+     "target": "__this_rq",
+     "kind": "direct",
+     "line": 8978
+    },
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 8983
+    },
+    {
+     "target": "find_user_dsq",
+     "kind": "direct",
+     "line": 8988
+    }
+   ]
+  },
+  "scx_bpf_dsq_peek": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9119,
+   "end_line": 9141,
+   "depth": 0,
+   "reads": [
+    "scx_dispatch_q.first_task"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9125
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 9126
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(dsq_id & SCX_DSQ_FLAG_BUILTIN)",
+     "action": "error",
+     "line": 9129
+    },
+    {
+     "kind": "error",
+     "msg": "peek disallowed on builtin DSQ 0x%llx",
+     "line": 9130
+    },
+    {
+     "kind": "call",
+     "target": "find_user_dsq",
+     "line": 9134
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!dsq)",
+     "action": "error",
+     "line": 9135
+    },
+    {
+     "kind": "error",
+     "msg": "peek on non-existent DSQ 0x%llx",
+     "line": 9136
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9125
+    },
+    {
+     "target": "find_user_dsq",
+     "kind": "direct",
+     "line": 9134
+    }
+   ]
+  },
+  "scx_bpf_dsq_reenq": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9158,
+   "end_line": 9181,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9166
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 9167
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(reenq_flags & ~__SCX_REENQ_USER_MASK)",
+     "action": "error",
+     "line": 9170
+    },
+    {
+     "kind": "error",
+     "msg": "invalid SCX_REENQ flags 0x%llx",
+     "line": 9171
+    },
+    {
+     "kind": "call",
+     "target": "find_dsq_for_dispatch",
+     "line": 9179
+    },
+    {
+     "kind": "call",
+     "target": "__this_rq",
+     "line": 9179
+    },
+    {
+     "kind": "call",
+     "target": "schedule_dsq_reenq",
+     "line": 9180
+    },
+    {
+     "kind": "call",
+     "target": "scx_locked_rq",
+     "line": 9180
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9166
+    },
+    {
+     "target": "__this_rq",
+     "kind": "direct",
+     "line": 9179
+    },
+    {
+     "target": "find_dsq_for_dispatch",
+     "kind": "direct",
+     "line": 9179
+    },
+    {
+     "target": "schedule_dsq_reenq",
+     "kind": "direct",
+     "line": 9180
+    },
+    {
+     "target": "scx_locked_rq",
+     "kind": "direct",
+     "line": 9180
+    }
+   ]
+  },
+  "scx_bpf_dump_bstr": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9310,
+   "end_line": 9354,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9320
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 9321
+    },
+    {
+     "kind": "guard",
+     "cond": "raw_smp_processor_id() != dd->cpu",
+     "action": "error",
+     "line": 9324
+    },
+    {
+     "kind": "error",
+     "msg": "scx_bpf_dump() must only be called from ops.dump() and friends",
+     "line": 9325
+    },
+    {
+     "kind": "call",
+     "target": "__bstr_format",
+     "line": 9330
+    },
+    {
+     "kind": "guard",
+     "cond": "ret < 0",
+     "action": "return",
+     "line": 9332
+    },
+    {
+     "kind": "call",
+     "target": "dump_line",
+     "line": 9333
+    },
+    {
+     "kind": "guard",
+     "cond": "!dd->cursor",
+     "action": "return",
+     "line": 9341
+    },
+    {
+     "kind": "call",
+     "target": "ops_dump_flush",
+     "line": 9353
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9320
+    },
+    {
+     "target": "__bstr_format",
+     "kind": "direct",
+     "line": 9330
+    },
+    {
+     "target": "dump_line",
+     "kind": "direct",
+     "line": 9333
+    },
+    {
+     "target": "ops_dump_flush",
+     "kind": "direct",
+     "line": 9353
+    }
+   ]
+  },
+  "scx_bpf_error_bstr": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9283,
+   "end_line": 9295,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "lock",
+     "lock": "scx_exit_bstr_buf_lock",
+     "expr": "&scx_exit_bstr_buf_lock",
+     "line": 9289
+    },
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9290
+    },
+    {
+     "kind": "call",
+     "target": "bstr_format",
+     "line": 9292
+    },
+    {
+     "kind": "error",
+     "msg": "%s",
+     "line": 9293
+    },
+    {
+     "kind": "unlock",
+     "lock": "scx_exit_bstr_buf_lock",
+     "expr": "&scx_exit_bstr_buf_lock",
+     "line": 9294
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9290
+    },
+    {
+     "target": "bstr_format",
+     "kind": "direct",
+     "line": 9292
+    }
+   ]
+  },
+  "scx_bpf_events": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9704,
+   "end_line": 9727,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_read_events",
+     "line": 9713
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_read_events",
+     "kind": "direct",
+     "line": 9713
+    }
+   ]
+  },
+  "scx_bpf_exit_bstr": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9258,
+   "end_line": 9271,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "lock",
+     "lock": "scx_exit_bstr_buf_lock",
+     "expr": "&scx_exit_bstr_buf_lock",
+     "line": 9265
+    },
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9266
+    },
+    {
+     "kind": "call",
+     "target": "bstr_format",
+     "line": 9268
+    },
+    {
+     "kind": "unlock",
+     "lock": "scx_exit_bstr_buf_lock",
+     "expr": "&scx_exit_bstr_buf_lock",
+     "line": 9270
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9266
+    },
+    {
+     "target": "bstr_format",
+     "kind": "direct",
+     "line": 9268
+    }
+   ]
+  },
+  "scx_bpf_get_idle_cpumask": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1150,
+   "end_line": 1169,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1156
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1157
+    },
+    {
+     "kind": "call",
+     "target": "check_builtin_idle_enabled",
+     "line": 1165
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1156
+    },
+    {
+     "target": "check_builtin_idle_enabled",
+     "kind": "direct",
+     "line": 1165
+    }
+   ]
+  },
+  "scx_bpf_get_idle_cpumask_node": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1125,
+   "end_line": 1140,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1131
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1132
+    },
+    {
+     "kind": "call",
+     "target": "validate_node",
+     "line": 1135
+    },
+    {
+     "kind": "call",
+     "target": "idle_cpumask",
+     "line": 1139
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1131
+    },
+    {
+     "target": "validate_node",
+     "kind": "direct",
+     "line": 1135
+    },
+    {
+     "target": "idle_cpumask",
+     "kind": "direct",
+     "line": 1139
+    }
+   ]
+  },
+  "scx_bpf_get_idle_smtmask": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1212,
+   "end_line": 1234,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1218
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1219
+    },
+    {
+     "kind": "error",
+     "msg": "SCX_OPS_BUILTIN_IDLE_PER_NODE enabled",
+     "line": 1223
+    },
+    {
+     "kind": "call",
+     "target": "check_builtin_idle_enabled",
+     "line": 1227
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1218
+    },
+    {
+     "target": "check_builtin_idle_enabled",
+     "kind": "direct",
+     "line": 1227
+    }
+   ]
+  },
+  "scx_bpf_get_idle_smtmask_node": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1183,
+   "end_line": 1201,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1189
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1190
+    },
+    {
+     "kind": "call",
+     "target": "validate_node",
+     "line": 1193
+    },
+    {
+     "kind": "call",
+     "target": "idle_cpumask",
+     "line": 1198
+    },
+    {
+     "kind": "call",
+     "target": "idle_cpumask",
+     "line": 1200
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1189
+    },
+    {
+     "target": "validate_node",
+     "kind": "direct",
+     "line": 1193
+    },
+    {
+     "target": "idle_cpumask",
+     "kind": "direct",
+     "line": 1198
+    },
+    {
+     "target": "idle_cpumask",
+     "kind": "direct",
+     "line": 1200
+    }
+   ]
+  },
+  "scx_bpf_get_online_cpumask": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9497,
+   "end_line": 9500,
+   "depth": 0,
+   "events": [],
+   "callees": []
+  },
+  "scx_bpf_get_possible_cpumask": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9489,
+   "end_line": 9492,
+   "depth": 0,
+   "events": [],
+   "callees": []
+  },
+  "scx_bpf_kick_cpu": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8945,
+   "end_line": 8953,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8950
+    },
+    {
+     "kind": "call",
+     "target": "scx_kick_cpu",
+     "line": 8952
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8950
+    },
+    {
+     "target": "scx_kick_cpu",
+     "kind": "direct",
+     "line": 8952
+    }
+   ]
+  },
+  "scx_bpf_locked_rq": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9569,
+   "end_line": 9587,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9576
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 9577
+    },
+    {
+     "kind": "call",
+     "target": "scx_locked_rq",
+     "line": 9580
+    },
+    {
+     "kind": "guard",
+     "cond": "!rq",
+     "action": "error",
+     "line": 9581
+    },
+    {
+     "kind": "error",
+     "msg": "accessing rq without holding rq lock",
+     "line": 9582
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9576
+    },
+    {
+     "target": "scx_locked_rq",
+     "kind": "direct",
+     "line": 9580
+    }
+   ]
+  },
+  "scx_bpf_now": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9640,
+   "end_line": 9672,
+   "depth": 0,
+   "reads": [
+    "rq.scx.clock",
+    "rq.scx.flags"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "__this_rq",
+     "line": 9647
+    },
+    {
+     "kind": "call",
+     "target": "sched_clock_cpu",
+     "line": 9666
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 9666
+    }
+   ],
+   "callees": [
+    {
+     "target": "__this_rq",
+     "kind": "direct",
+     "line": 9647
+    },
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 9666
+    },
+    {
+     "target": "sched_clock_cpu",
+     "kind": "direct",
+     "line": 9666
+    }
+   ]
+  },
+  "scx_bpf_nr_cpu_ids": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9481,
+   "end_line": 9484,
+   "depth": 0,
+   "events": [],
+   "callees": []
+  },
+  "scx_bpf_nr_node_ids": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9471,
+   "end_line": 9474,
+   "depth": 0,
+   "events": [],
+   "callees": []
+  },
+  "scx_bpf_pick_any_cpu": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1436,
+   "end_line": 1464,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1444
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1445
+    },
+    {
+     "kind": "error",
+     "msg": "per-node idle tracking is enabled",
+     "line": 1449
+    },
+    {
+     "kind": "call",
+     "target": "scx_pick_idle_cpu",
+     "line": 1454
+    },
+    {
+     "kind": "call",
+     "target": "cpumask_any_distribute",
+     "line": 1459
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1444
+    },
+    {
+     "target": "scx_pick_idle_cpu",
+     "kind": "direct",
+     "line": 1454
+    },
+    {
+     "target": "cpumask_any_distribute",
+     "kind": "direct",
+     "line": 1459
+    }
+   ]
+  },
+  "scx_bpf_pick_any_cpu_node": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1387,
+   "end_line": 1416,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1396
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1397
+    },
+    {
+     "kind": "call",
+     "target": "validate_node",
+     "line": 1400
+    },
+    {
+     "kind": "call",
+     "target": "scx_pick_idle_cpu",
+     "line": 1404
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu >= 0",
+     "action": "return",
+     "line": 1405
+    },
+    {
+     "kind": "call",
+     "target": "cpumask_any_and_distribute",
+     "line": 1409
+    },
+    {
+     "kind": "call",
+     "target": "cpumask_any_distribute",
+     "line": 1411
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1396
+    },
+    {
+     "target": "validate_node",
+     "kind": "direct",
+     "line": 1400
+    },
+    {
+     "target": "scx_pick_idle_cpu",
+     "kind": "direct",
+     "line": 1404
+    },
+    {
+     "target": "cpumask_any_and_distribute",
+     "kind": "direct",
+     "line": 1409
+    },
+    {
+     "target": "cpumask_any_distribute",
+     "kind": "direct",
+     "line": 1411
+    }
+   ]
+  },
+  "scx_bpf_pick_idle_cpu": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1343,
+   "end_line": 1363,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1350
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1351
+    },
+    {
+     "kind": "error",
+     "msg": "per-node idle tracking is enabled",
+     "line": 1355
+    },
+    {
+     "kind": "call",
+     "target": "check_builtin_idle_enabled",
+     "line": 1359
+    },
+    {
+     "kind": "call",
+     "target": "scx_pick_idle_cpu",
+     "line": 1362
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1350
+    },
+    {
+     "target": "check_builtin_idle_enabled",
+     "kind": "direct",
+     "line": 1359
+    },
+    {
+     "target": "scx_pick_idle_cpu",
+     "kind": "direct",
+     "line": 1362
+    }
+   ]
+  },
+  "scx_bpf_pick_idle_cpu_node": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1301,
+   "end_line": 1318,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1309
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1310
+    },
+    {
+     "kind": "call",
+     "target": "validate_node",
+     "line": 1313
+    },
+    {
+     "kind": "call",
+     "target": "scx_pick_idle_cpu",
+     "line": 1317
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1309
+    },
+    {
+     "target": "validate_node",
+     "kind": "direct",
+     "line": 1313
+    },
+    {
+     "target": "scx_pick_idle_cpu",
+     "kind": "direct",
+     "line": 1317
+    }
+   ]
+  },
+  "scx_bpf_put_cpumask": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9506,
+   "end_line": 9514,
+   "depth": 0,
+   "events": [],
+   "callees": []
+  },
+  "scx_bpf_put_idle_cpumask": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1241,
+   "end_line": 1249,
+   "depth": 0,
+   "events": [],
+   "callees": []
+  },
+  "scx_bpf_reenqueue_local": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8727,
+   "end_line": 8741,
+   "depth": 0,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8733
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 8734
+    },
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 8738
+    },
+    {
+     "kind": "call",
+     "target": "reenq_local",
+     "line": 8740
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8733
+    },
+    {
+     "target": "reenq_local",
+     "kind": "direct",
+     "line": 8740
+    }
+   ]
+  },
+  "scx_bpf_reenqueue_local___v2": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9194,
+   "end_line": 9197,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_bpf_dsq_reenq",
+     "line": 9196
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_bpf_dsq_reenq",
+     "kind": "direct",
+     "line": 9196
+    }
+   ]
+  },
+  "scx_bpf_select_cpu_and": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1088,
+   "end_line": 1112,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1096
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!list_empty(&sch->children))",
+     "action": "error",
+     "line": 1104
+    },
+    {
+     "kind": "call",
+     "target": "scx_task_sched",
+     "line": 1105
+    },
+    {
+     "kind": "error",
+     "msg": "__scx_bpf_select_cpu_and() must be used",
+     "line": 1105
+    },
+    {
+     "kind": "call",
+     "target": "select_cpu_from_kfunc",
+     "line": 1110
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_task_sched",
+     "kind": "direct",
+     "line": 1105
+    },
+    {
+     "target": "select_cpu_from_kfunc",
+     "kind": "direct",
+     "line": 1110
+    }
+   ]
+  },
+  "scx_bpf_select_cpu_dfl": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1014,
+   "end_line": 1034,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1023
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1024
+    },
+    {
+     "kind": "call",
+     "target": "select_cpu_from_kfunc",
+     "line": 1027
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1023
+    },
+    {
+     "target": "select_cpu_from_kfunc",
+     "kind": "direct",
+     "line": 1027
+    }
+   ]
+  },
+  "scx_bpf_sub_dispatch": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8668,
+   "end_line": 8691,
+   "depth": 0,
+   "reads": [
+    "rq.scx.sub_dispatch_prev"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "__this_rq",
+     "line": 8670
+    },
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8674
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!parent)",
+     "action": "return",
+     "line": 8675
+    },
+    {
+     "kind": "call",
+     "target": "scx_find_sub_sched",
+     "line": 8678
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!child)",
+     "action": "return",
+     "line": 8680
+    },
+    {
+     "kind": "call",
+     "target": "scx_parent",
+     "line": 8683
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(scx_parent(child) != parent)",
+     "action": "error",
+     "line": 8683
+    },
+    {
+     "kind": "error",
+     "msg": "trying to dispatch a distant sub-sched on cgroup %llu",
+     "line": 8684
+    },
+    {
+     "kind": "call",
+     "target": "scx_dispatch_sched",
+     "line": 8689
+    }
+   ],
+   "callees": [
+    {
+     "target": "__this_rq",
+     "kind": "direct",
+     "line": 8670
+    },
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8674
+    },
+    {
+     "target": "scx_find_sub_sched",
+     "kind": "direct",
+     "line": 8678
+    },
+    {
+     "target": "scx_parent",
+     "kind": "direct",
+     "line": 8683
+    },
+    {
+     "target": "scx_dispatch_sched",
+     "kind": "direct",
+     "line": 8689
+    }
+   ]
+  },
+  "scx_bpf_task_cgroup": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9741,
+   "end_line": 9762,
+   "depth": 0,
+   "reads": [
+    "task_struct.sched_task_group"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 9750
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "continue",
+     "line": 9751
+    },
+    {
+     "kind": "call",
+     "target": "scx_kf_arg_task_ok",
+     "line": 9754
+    },
+    {
+     "kind": "guard",
+     "cond": "!scx_kf_arg_task_ok(sch, p)",
+     "action": "continue",
+     "line": 9754
+    },
+    {
+     "kind": "call",
+     "target": "tg_cgrp",
+     "line": 9757
+    },
+    {
+     "kind": "call",
+     "target": "cgroup_get",
+     "line": 9760
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 9750
+    },
+    {
+     "target": "scx_kf_arg_task_ok",
+     "kind": "direct",
+     "line": 9754
+    },
+    {
+     "target": "tg_cgrp",
+     "kind": "direct",
+     "line": 9757
+    },
+    {
+     "target": "cgroup_get",
+     "kind": "direct",
+     "line": 9760
+    }
+   ]
+  },
+  "scx_bpf_task_cpu": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9529,
+   "end_line": 9532,
+   "depth": 0,
+   "reads": [
+    "task_struct.thread_info.cpu"
+   ],
+   "events": [],
+   "callees": []
+  },
+  "scx_bpf_task_running": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 9520,
+   "end_line": 9523,
+   "depth": 0,
+   "reads": [
+    "task_struct.thread_info.cpu"
+   ],
+   "events": [],
+   "callees": []
+  },
+  "scx_bpf_task_set_dsq_vtime": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8867,
+   "end_line": 8879,
+   "depth": 0,
+   "writes": [
+    "task_struct.scx.dsq_vtime"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8873
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch || !scx_task_on_sched(sch, p))",
+     "action": "return",
+     "line": 8874
+    },
+    {
+     "kind": "call",
+     "target": "scx_task_on_sched",
+     "line": 8874
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_vtime",
+     "op": "set",
+     "line": 8877
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8873
+    },
+    {
+     "target": "scx_task_on_sched",
+     "kind": "direct",
+     "line": 8874
+    }
+   ]
+  },
+  "scx_bpf_task_set_slice": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext.c",
+   "line": 8844,
+   "end_line": 8856,
+   "depth": 0,
+   "writes": [
+    "task_struct.scx.slice"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 8850
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch || !scx_task_on_sched(sch, p))",
+     "action": "return",
+     "line": 8851
+    },
+    {
+     "kind": "call",
+     "target": "scx_task_on_sched",
+     "line": 8851
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.slice",
+     "op": "set",
+     "line": 8854
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 8850
+    },
+    {
+     "target": "scx_task_on_sched",
+     "kind": "direct",
+     "line": 8851
+    }
+   ]
+  },
+  "scx_bpf_test_and_clear_cpu_idle": {
+   "kind": "kfunc",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 1262,
+   "end_line": 1279,
+   "depth": 0,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_prog_sched",
+     "line": 1268
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!sch)",
+     "action": "return",
+     "line": 1269
+    },
+    {
+     "kind": "call",
+     "target": "check_builtin_idle_enabled",
+     "line": 1272
+    },
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 1275
+    },
+    {
+     "kind": "guard",
+     "cond": "!ops_cpu_valid(sch, cpu, NULL)",
+     "action": "return",
+     "line": 1275
+    },
+    {
+     "kind": "call",
+     "target": "scx_idle_test_and_clear_cpu",
+     "line": 1278
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_prog_sched",
+     "kind": "direct",
+     "line": 1268
+    },
+    {
+     "target": "check_builtin_idle_enabled",
+     "kind": "direct",
+     "line": 1272
+    },
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 1275
+    },
+    {
+     "target": "scx_idle_test_and_clear_cpu",
+     "kind": "direct",
+     "line": 1278
+    }
+   ]
+  },
+  "scx_bypassing": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_internal.h",
+   "line": 1380,
+   "end_line": 1384,
+   "depth": 2,
+   "events": [],
+   "callees": []
+  },
+  "scx_cpu_node_if_enabled": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 69,
+   "end_line": 75,
+   "depth": 2,
+   "events": [],
+   "callees": []
+  },
+  "scx_dispatch_sched": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2784,
+   "end_line": 2883,
+   "depth": 1,
+   "reads": [
+    "rq.scx.flags",
+    "rq.scx.local_dsq.nr",
+    "task_struct.sched_class",
+    "task_struct.scx.flags",
+    "task_struct.scx.slice"
+   ],
+   "writes": [
+    "rq.scx.flags",
+    "rq.scx.sub_dispatch_prev"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 2789
+    },
+    {
+     "kind": "call",
+     "target": "scx_task_on_sched",
+     "line": 2791
+    },
+    {
+     "kind": "call",
+     "target": "consume_global_dsq",
+     "line": 2793
+    },
+    {
+     "kind": "guard",
+     "cond": "consume_global_dsq(sch, rq)",
+     "action": "return",
+     "line": 2793
+    },
+    {
+     "kind": "call",
+     "target": "bypass_dsp_enabled",
+     "line": 2796
+    },
+    {
+     "kind": "call",
+     "target": "scx_bypassing",
+     "line": 2798
+    },
+    {
+     "kind": "guard",
+     "cond": "scx_bypassing(sch, cpu)",
+     "action": "return",
+     "line": 2798
+    },
+    {
+     "kind": "call",
+     "target": "consume_dispatch_q",
+     "line": 2799
+    },
+    {
+     "kind": "call",
+     "target": "bypass_dsq",
+     "line": 2799
+    },
+    {
+     "kind": "guard",
+     "cond": "!(pcpu->bypass_host_seq++ % SCX_BYPASS_HOST_NTH) && consume_dispatch_q(sch, rq, bypass_dsq(sch, cpu), 0)",
+     "action": "return",
+     "line": 2816
+    },
+    {
+     "kind": "call",
+     "target": "consume_dispatch_q",
+     "line": 2817
+    },
+    {
+     "kind": "call",
+     "target": "bypass_dsq",
+     "line": 2817
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!SCX_HAS_OP(sch, dispatch)) || !scx_rq_online(rq)",
+     "action": "return",
+     "line": 2824
+    },
+    {
+     "kind": "call",
+     "target": "scx_rq_online",
+     "line": 2824
+    },
+    {
+     "kind": "call",
+     "target": "ops.dispatch",
+     "line": 2840
+    },
+    {
+     "kind": "call",
+     "target": "scx_locked_rq",
+     "line": 2840
+    },
+    {
+     "kind": "call",
+     "target": "update_locked_rq",
+     "line": 2840
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.sub_dispatch_prev",
+     "op": "set",
+     "line": 2843
+    },
+    {
+     "kind": "call",
+     "target": "ops.dispatch",
+     "line": 2844
+    },
+    {
+     "kind": "call",
+     "target": "scx_locked_rq",
+     "line": 2844
+    },
+    {
+     "kind": "call",
+     "target": "update_locked_rq",
+     "line": 2844
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.sub_dispatch_prev",
+     "op": "set",
+     "line": 2845
+    },
+    {
+     "kind": "call",
+     "target": "flush_dispatch_buf",
+     "line": 2848
+    },
+    {
+     "kind": "guard",
+     "cond": "(prev->scx.flags & SCX_TASK_QUEUED) && prev->scx.slice",
+     "action": "return",
+     "line": 2850
+    },
+    {
+     "kind": "write",
+     "field": "rq.scx.flags",
+     "op": "set",
+     "line": 2851
+    },
+    {
+     "kind": "guard",
+     "cond": "rq->scx.local_dsq.nr",
+     "action": "return",
+     "line": 2854
+    },
+    {
+     "kind": "call",
+     "target": "consume_global_dsq",
+     "line": 2856
+    },
+    {
+     "kind": "guard",
+     "cond": "consume_global_dsq(sch, rq)",
+     "action": "return",
+     "line": 2856
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!--nr_loops)",
+     "action": "continue",
+     "line": 2868
+    },
+    {
+     "kind": "call",
+     "target": "scx_kick_cpu",
+     "line": 2869
+    },
+    {
+     "kind": "call",
+     "target": "bypass_dsp_enabled",
+     "line": 2879
+    },
+    {
+     "kind": "guard",
+     "cond": "bypass_dsp_enabled(sch)",
+     "action": "return",
+     "line": 2879
+    },
+    {
+     "kind": "call",
+     "target": "consume_dispatch_q",
+     "line": 2880
+    },
+    {
+     "kind": "call",
+     "target": "bypass_dsq",
+     "line": 2880
+    }
+   ],
+   "callees": [
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 2789
+    },
+    {
+     "target": "scx_task_on_sched",
+     "kind": "direct",
+     "line": 2791
+    },
+    {
+     "target": "consume_global_dsq",
+     "kind": "direct",
+     "line": 2793
+    },
+    {
+     "target": "bypass_dsp_enabled",
+     "kind": "direct",
+     "line": 2796
+    },
+    {
+     "target": "scx_bypassing",
+     "kind": "direct",
+     "line": 2798
+    },
+    {
+     "target": "bypass_dsq",
+     "kind": "direct",
+     "line": 2799
+    },
+    {
+     "target": "consume_dispatch_q",
+     "kind": "direct",
+     "line": 2799
+    },
+    {
+     "target": "bypass_dsq",
+     "kind": "direct",
+     "line": 2817
+    },
+    {
+     "target": "consume_dispatch_q",
+     "kind": "direct",
+     "line": 2817
+    },
+    {
+     "target": "scx_rq_online",
+     "kind": "direct",
+     "line": 2824
+    },
+    {
+     "target": "ops.dispatch",
+     "kind": "indirect",
+     "line": 2840
+    },
+    {
+     "target": "scx_locked_rq",
+     "kind": "direct",
+     "line": 2840
+    },
+    {
+     "target": "update_locked_rq",
+     "kind": "direct",
+     "line": 2840
+    },
+    {
+     "target": "ops.dispatch",
+     "kind": "indirect",
+     "line": 2844
+    },
+    {
+     "target": "scx_locked_rq",
+     "kind": "direct",
+     "line": 2844
+    },
+    {
+     "target": "update_locked_rq",
+     "kind": "direct",
+     "line": 2844
+    },
+    {
+     "target": "flush_dispatch_buf",
+     "kind": "direct",
+     "line": 2848
+    },
+    {
+     "target": "consume_global_dsq",
+     "kind": "direct",
+     "line": 2856
+    },
+    {
+     "target": "scx_kick_cpu",
+     "kind": "direct",
+     "line": 2869
+    },
+    {
+     "target": "bypass_dsp_enabled",
+     "kind": "direct",
+     "line": 2879
+    },
+    {
+     "target": "bypass_dsq",
+     "kind": "direct",
+     "line": 2880
+    },
+    {
+     "target": "consume_dispatch_q",
+     "kind": "direct",
+     "line": 2880
+    }
+   ]
+  },
+  "scx_dsq_insert_commit": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 8126,
+   "end_line": 8149,
+   "depth": 1,
+   "reads": [
+    "task_struct.scx.ops_state"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "ddsp_task",
+     "action": "return",
+     "line": 8133
+    },
+    {
+     "kind": "call",
+     "target": "mark_direct_dispatch",
+     "line": 8134
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(dspc->cursor >= sch->dsp_max_batch)",
+     "action": "error",
+     "line": 8138
+    },
+    {
+     "kind": "error",
+     "msg": "dispatch buffer overflow",
+     "line": 8139
+    },
+    {
+     "kind": "atomic",
+     "field": "task_struct.scx.ops_state",
+     "op": "read",
+     "line": 8145
+    }
+   ],
+   "callees": [
+    {
+     "target": "mark_direct_dispatch",
+     "kind": "direct",
+     "line": 8134
+    }
+   ]
+  },
+  "scx_dsq_insert_preamble": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 8099,
+   "end_line": 8124,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "irqs_disabled",
+     "expr": "lockdep_assert_irqs_disabled()",
+     "line": 8102
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!p)",
+     "action": "error",
+     "line": 8104
+    },
+    {
+     "kind": "error",
+     "msg": "called with NULL task",
+     "line": 8105
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(*enq_flags & __SCX_ENQ_INTERNAL_MASK)",
+     "action": "error",
+     "line": 8109
+    },
+    {
+     "kind": "error",
+     "msg": "invalid enq_flags 0x%llx",
+     "line": 8110
+    },
+    {
+     "kind": "call",
+     "target": "scx_task_on_sched",
+     "line": 8115
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!scx_task_on_sched(sch, p))",
+     "action": "return",
+     "line": 8115
+    },
+    {
+     "kind": "call",
+     "target": "scx_vet_enq_flags",
+     "line": 8120
+    },
+    {
+     "kind": "guard",
+     "cond": "!scx_vet_enq_flags(sch, dsq_id, enq_flags)",
+     "action": "return",
+     "line": 8120
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_task_on_sched",
+     "kind": "direct",
+     "line": 8115
+    },
+    {
+     "target": "scx_vet_enq_flags",
+     "kind": "direct",
+     "line": 8120
+    }
+   ]
+  },
+  "scx_dsq_insert_vtime": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 8227,
+   "end_line": 8243,
+   "depth": 1,
+   "reads": [
+    "task_struct.scx.slice"
+   ],
+   "writes": [
+    "task_struct.scx.dsq_vtime",
+    "task_struct.scx.slice"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "!scx_dsq_insert_preamble(sch, p, dsq_id, &enq_flags)",
+     "action": "return",
+     "line": 8230
+    },
+    {
+     "kind": "call",
+     "target": "scx_dsq_insert_preamble",
+     "line": 8230
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.slice",
+     "op": "set",
+     "line": 8234
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.slice",
+     "op": "set",
+     "line": 8236
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_vtime",
+     "op": "set",
+     "line": 8238
+    },
+    {
+     "kind": "call",
+     "target": "scx_dsq_insert_commit",
+     "line": 8240
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_dsq_insert_preamble",
+     "kind": "direct",
+     "line": 8230
+    },
+    {
+     "target": "scx_dsq_insert_commit",
+     "kind": "direct",
+     "line": 8240
+    }
+   ]
+  },
+  "scx_dsq_move": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 8344,
+   "end_line": 8438,
+   "depth": 1,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "rq.scx.flags",
+    "scx_dispatch_q.sched",
+    "task_struct.pid",
+    "task_struct.thread_info.cpu"
+   ],
+   "writes": [
+    "task_struct.scx.dsq_vtime",
+    "task_struct.scx.slice"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "unlikely(!src_dsq)",
+     "action": "return",
+     "line": 8359
+    },
+    {
+     "kind": "call",
+     "target": "scx_vet_enq_flags",
+     "line": 8364
+    },
+    {
+     "kind": "guard",
+     "cond": "!scx_vet_enq_flags(sch, dsq_id, &enq_flags)",
+     "action": "return",
+     "line": 8364
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(READ_ONCE(sch->aborting))",
+     "action": "return",
+     "line": 8371
+    },
+    {
+     "kind": "call",
+     "target": "scx_task_on_sched",
+     "line": 8374
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(!scx_task_on_sched(sch, p))",
+     "action": "error",
+     "line": 8374
+    },
+    {
+     "kind": "error",
+     "msg": "scx_bpf_dsq_move[_vtime]() on %s[%d] but the task belongs to a different scheduler",
+     "line": 8375
+    },
+    {
+     "kind": "call",
+     "target": "__this_rq",
+     "line": 8388
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "this_rq",
+     "line": 8393
+    },
+    {
+     "kind": "lock",
+     "lock": "dsq",
+     "expr": "&src_dsq->lock",
+     "line": 8401
+    },
+    {
+     "kind": "call",
+     "target": "nldsq_cursor_lost_task",
+     "line": 8404
+    },
+    {
+     "kind": "guard",
+     "cond": "nldsq_cursor_lost_task(&kit->cursor, src_rq, src_dsq, p)",
+     "action": "continue",
+     "line": 8404
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&src_dsq->lock",
+     "line": 8405
+    },
+    {
+     "kind": "call",
+     "target": "find_dsq_for_dispatch",
+     "line": 8410
+    },
+    {
+     "kind": "guard",
+     "cond": "kit->cursor.flags & __SCX_DSQ_ITER_HAS_VTIME",
+     "action": "fallback",
+     "line": 8417
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_vtime",
+     "op": "set",
+     "line": 8418
+    },
+    {
+     "kind": "guard",
+     "cond": "kit->cursor.flags & __SCX_DSQ_ITER_HAS_SLICE",
+     "action": "fallback",
+     "line": 8419
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.slice",
+     "op": "set",
+     "line": 8420
+    },
+    {
+     "kind": "call",
+     "target": "move_task_between_dsqs",
+     "line": 8423
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "locked_rq",
+     "line": 8428
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "this_rq",
+     "line": 8429
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "locked_rq",
+     "line": 8432
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_vet_enq_flags",
+     "kind": "direct",
+     "line": 8364
+    },
+    {
+     "target": "scx_task_on_sched",
+     "kind": "direct",
+     "line": 8374
+    },
+    {
+     "target": "__this_rq",
+     "kind": "direct",
+     "line": 8388
+    },
+    {
+     "target": "nldsq_cursor_lost_task",
+     "kind": "direct",
+     "line": 8404
+    },
+    {
+     "target": "find_dsq_for_dispatch",
+     "kind": "direct",
+     "line": 8410
+    },
+    {
+     "target": "move_task_between_dsqs",
+     "kind": "direct",
+     "line": 8423
+    }
+   ]
+  },
+  "scx_find_sub_sched": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 287,
+   "end_line": 291,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "call",
+     "target": "rcu_read_lock_any_held",
+     "line": 289
+    },
+    {
+     "kind": "call",
+     "target": "rht_bucket_nested",
+     "line": 289
+    },
+    {
+     "kind": "call",
+     "target": "bcmp",
+     "line": 289
+    }
+   ],
+   "callees": [
+    {
+     "target": "bcmp",
+     "kind": "direct",
+     "line": 289
+    },
+    {
+     "target": "rcu_read_lock_any_held",
+     "kind": "direct",
+     "line": 289
+    },
+    {
+     "target": "rht_bucket_nested",
+     "kind": "direct",
+     "line": 289
+    }
+   ]
+  },
+  "scx_idle_test_and_clear_cpu": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 77,
+   "end_line": 110,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_cpu_node_if_enabled",
+     "line": 79
+    },
+    {
+     "kind": "call",
+     "target": "idle_cpumask",
+     "line": 80
+    },
+    {
+     "kind": "call",
+     "target": "idle_cpumask",
+     "line": 90
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_cpu_node_if_enabled",
+     "kind": "direct",
+     "line": 79
+    },
+    {
+     "target": "idle_cpumask",
+     "kind": "direct",
+     "line": 80
+    },
+    {
+     "target": "idle_cpumask",
+     "kind": "direct",
+     "line": 90
+    }
+   ]
+  },
+  "scx_is_descendant": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 310,
+   "end_line": 315,
+   "depth": 2,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "sch->level < ancestor->level",
+     "action": "return",
+     "line": 312
+    }
+   ],
+   "callees": []
+  },
+  "scx_kf_arg_task_ok": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 549,
+   "end_line": 559,
+   "depth": 1,
+   "reads": [
+    "task_struct.scx.kf_tasks"
+   ],
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "unlikely((p != current->scx.kf_tasks[0] && p != current->scx.kf_tasks[1]))",
+     "action": "error",
+     "line": 552
+    },
+    {
+     "kind": "error",
+     "msg": "called on a task not being operated on",
+     "line": 554
+    }
+   ],
+   "callees": []
+  },
+  "scx_kick_cpu": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 8881,
+   "end_line": 8932,
+   "depth": 1,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "rq.scx.cpus_to_kick",
+    "rq.scx.cpus_to_kick_if_idle",
+    "rq.scx.cpus_to_preempt",
+    "rq.scx.cpus_to_wait"
+   ],
+   "writes": [
+    "rq.scx.cpus_to_kick",
+    "rq.scx.cpus_to_kick_if_idle",
+    "rq.scx.cpus_to_preempt",
+    "rq.scx.cpus_to_wait"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 8886
+    },
+    {
+     "kind": "guard",
+     "cond": "!ops_cpu_valid(sch, cpu, NULL)",
+     "action": "return",
+     "line": 8886
+    },
+    {
+     "kind": "call",
+     "target": "__this_rq",
+     "line": 8891
+    },
+    {
+     "kind": "call",
+     "target": "scx_bypassing",
+     "line": 8898
+    },
+    {
+     "kind": "guard",
+     "cond": "scx_bypassing(sch, cpu_of(this_rq))",
+     "action": "continue",
+     "line": 8898
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 8898
+    },
+    {
+     "kind": "error",
+     "msg": "PREEMPT/WAIT cannot be used with SCX_KICK_IDLE",
+     "line": 8910
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "target_rq",
+     "op": "trylock",
+     "line": 8912
+    },
+    {
+     "kind": "call",
+     "target": "can_skip_idle_kick",
+     "line": 8913
+    },
+    {
+     "kind": "guard",
+     "cond": "can_skip_idle_kick(target_rq)",
+     "action": "continue",
+     "line": 8913
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "target_rq",
+     "line": 8914
+    },
+    {
+     "kind": "unlock",
+     "lock": "rq",
+     "expr": "target_rq",
+     "line": 8917
+    },
+    {
+     "kind": "atomic",
+     "field": "rq.scx.cpus_to_kick_if_idle",
+     "op": "set_bit",
+     "line": 8919
+    },
+    {
+     "kind": "atomic",
+     "field": "rq.scx.cpus_to_kick",
+     "op": "set_bit",
+     "line": 8921
+    },
+    {
+     "kind": "atomic",
+     "field": "rq.scx.cpus_to_preempt",
+     "op": "set_bit",
+     "line": 8924
+    },
+    {
+     "kind": "atomic",
+     "field": "rq.scx.cpus_to_wait",
+     "op": "set_bit",
+     "line": 8926
+    },
+    {
+     "kind": "call",
+     "target": "irq_work_queue",
+     "line": 8929
+    }
+   ],
+   "callees": [
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 8886
+    },
+    {
+     "target": "__this_rq",
+     "kind": "direct",
+     "line": 8891
+    },
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 8898
+    },
+    {
+     "target": "scx_bypassing",
+     "kind": "direct",
+     "line": 8898
+    },
+    {
+     "target": "can_skip_idle_kick",
+     "kind": "direct",
+     "line": 8913
+    },
+    {
+     "target": "irq_work_queue",
+     "kind": "direct",
+     "line": 8929
+    }
+   ]
+  },
+  "scx_locked_rq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_internal.h",
+   "line": 1375,
+   "end_line": 1378,
+   "depth": 1,
+   "events": [],
+   "callees": []
+  },
+  "scx_parent": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 243,
+   "end_line": 249,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "sch->level",
+     "action": "return",
+     "line": 245
+    }
+   ],
+   "callees": []
+  },
+  "scx_pick_idle_cpu": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 200,
+   "end_line": 225,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "call",
+     "target": "pick_idle_cpu_in_node",
+     "line": 209
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu >= 0",
+     "action": "return",
+     "line": 210
+    },
+    {
+     "kind": "guard",
+     "cond": "node == NUMA_NO_NODE || flags & SCX_PICK_IDLE_IN_NODE",
+     "action": "return",
+     "line": 218
+    },
+    {
+     "kind": "call",
+     "target": "pick_idle_cpu_from_online_nodes",
+     "line": 224
+    }
+   ],
+   "callees": [
+    {
+     "target": "pick_idle_cpu_in_node",
+     "kind": "direct",
+     "line": 209
+    },
+    {
+     "target": "pick_idle_cpu_from_online_nodes",
+     "kind": "direct",
+     "line": 224
+    }
+   ]
+  },
+  "scx_prog_sched": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_internal.h",
+   "line": 1433,
+   "end_line": 1459,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "call",
+     "target": "bpf_prog_get_assoc_struct_ops",
+     "line": 1438
+    },
+    {
+     "kind": "guard",
+     "cond": "likely(ops)",
+     "action": "return",
+     "line": 1439
+    },
+    {
+     "kind": "call",
+     "target": "rcu_read_lock_any_held",
+     "line": 1440
+    },
+    {
+     "kind": "call",
+     "target": "rcu_read_lock_any_held",
+     "line": 1442
+    },
+    {
+     "kind": "guard",
+     "cond": "!root->ops.sub_attach",
+     "action": "return",
+     "line": 1448
+    }
+   ],
+   "callees": [
+    {
+     "target": "bpf_prog_get_assoc_struct_ops",
+     "kind": "direct",
+     "line": 1438
+    },
+    {
+     "target": "rcu_read_lock_any_held",
+     "kind": "direct",
+     "line": 1440
+    },
+    {
+     "target": "rcu_read_lock_any_held",
+     "kind": "direct",
+     "line": 1442
+    }
+   ]
+  },
+  "scx_read_events": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 9674,
+   "end_line": 9697,
+   "depth": 1,
+   "events": [],
+   "callees": []
+  },
+  "scx_rq_clock_invalidate": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 1856,
+   "end_line": 1861,
+   "depth": 3,
+   "reads": [
+    "rq.scx.flags"
+   ],
+   "writes": [
+    "rq.scx.flags"
+   ],
+   "events": [
+    {
+     "kind": "write",
+     "field": "rq.scx.flags",
+     "op": "write_once",
+     "line": 1860
+    }
+   ],
+   "callees": []
+  },
+  "scx_rq_online": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1871,
+   "end_line": 1881,
+   "depth": 2,
+   "reads": [
+    "rq.scx.flags"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 1880
+    }
+   ],
+   "callees": [
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 1880
+    }
+   ]
+  },
+  "scx_select_cpu_dfl": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 457,
+   "end_line": 673,
+   "depth": 2,
+   "reads": [
+    "rq.scx.local_dsq.nr",
+    "task_struct.cpus_ptr",
+    "task_struct.flags"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "scx_cpu_node_if_enabled",
+     "line": 462
+    },
+    {
+     "kind": "call",
+     "target": "task_affinity_all",
+     "line": 474
+    },
+    {
+     "kind": "call",
+     "target": "numa_span",
+     "line": 504
+    },
+    {
+     "kind": "call",
+     "target": "task_affinity_all",
+     "line": 506
+    },
+    {
+     "kind": "guard",
+     "cond": "cpus && cpumask_and(local_cpus, allowed, cpus)",
+     "action": "fallback",
+     "line": 508
+    },
+    {
+     "kind": "call",
+     "target": "llc_span",
+     "line": 514
+    },
+    {
+     "kind": "call",
+     "target": "task_affinity_all",
+     "line": 516
+    },
+    {
+     "kind": "guard",
+     "cond": "cpus && cpumask_and(local_cpus, allowed, cpus)",
+     "action": "fallback",
+     "line": 518
+    },
+    {
+     "kind": "guard",
+     "cond": "is_prev_allowed && cpus_share_cache(cpu, prev_cpu) && scx_idle_test_and_clear_cpu(prev_cpu)",
+     "action": "continue",
+     "line": 533
+    },
+    {
+     "kind": "call",
+     "target": "cpus_share_cache",
+     "line": 533
+    },
+    {
+     "kind": "call",
+     "target": "scx_idle_test_and_clear_cpu",
+     "line": 534
+    },
+    {
+     "kind": "call",
+     "target": "scx_cpu_node_if_enabled",
+     "line": 552
+    },
+    {
+     "kind": "call",
+     "target": "idle_cpumask",
+     "line": 556
+    },
+    {
+     "kind": "guard",
+     "cond": "cpumask_test_cpu(cpu, allowed)",
+     "action": "continue",
+     "line": 557
+    },
+    {
+     "kind": "guard",
+     "cond": "is_prev_allowed && cpumask_test_cpu(prev_cpu, idle_cpumask(node)->smt) && scx_idle_test_and_clear_cpu(prev_cpu)",
+     "action": "continue",
+     "line": 570
+    },
+    {
+     "kind": "call",
+     "target": "idle_cpumask",
+     "line": 571
+    },
+    {
+     "kind": "call",
+     "target": "scx_idle_test_and_clear_cpu",
+     "line": 572
+    },
+    {
+     "kind": "call",
+     "target": "pick_idle_cpu_in_node",
+     "line": 581
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu >= 0",
+     "action": "continue",
+     "line": 582
+    },
+    {
+     "kind": "call",
+     "target": "pick_idle_cpu_in_node",
+     "line": 590
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu >= 0",
+     "action": "continue",
+     "line": 591
+    },
+    {
+     "kind": "call",
+     "target": "scx_pick_idle_cpu",
+     "line": 603
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu >= 0",
+     "action": "continue",
+     "line": 604
+    },
+    {
+     "kind": "guard",
+     "cond": "flags & SCX_PICK_IDLE_CORE",
+     "action": "continue",
+     "line": 611
+    },
+    {
+     "kind": "guard",
+     "cond": "is_prev_allowed && scx_idle_test_and_clear_cpu(prev_cpu)",
+     "action": "continue",
+     "line": 620
+    },
+    {
+     "kind": "call",
+     "target": "scx_idle_test_and_clear_cpu",
+     "line": 620
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu == prev_cpu",
+     "action": "continue",
+     "line": 631
+    },
+    {
+     "kind": "call",
+     "target": "scx_idle_test_and_clear_cpu",
+     "line": 633
+    },
+    {
+     "kind": "guard",
+     "cond": "scx_idle_test_and_clear_cpu(cpu)",
+     "action": "continue",
+     "line": 633
+    },
+    {
+     "kind": "call",
+     "target": "pick_idle_cpu_in_node",
+     "line": 643
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu >= 0",
+     "action": "continue",
+     "line": 644
+    },
+    {
+     "kind": "call",
+     "target": "pick_idle_cpu_in_node",
+     "line": 652
+    },
+    {
+     "kind": "guard",
+     "cond": "cpu >= 0",
+     "action": "continue",
+     "line": 653
+    },
+    {
+     "kind": "call",
+     "target": "scx_pick_idle_cpu",
+     "line": 665
+    }
+   ],
+   "callees": [
+    {
+     "target": "scx_cpu_node_if_enabled",
+     "kind": "direct",
+     "line": 462
+    },
+    {
+     "target": "task_affinity_all",
+     "kind": "direct",
+     "line": 474
+    },
+    {
+     "target": "numa_span",
+     "kind": "direct",
+     "line": 504
+    },
+    {
+     "target": "task_affinity_all",
+     "kind": "direct",
+     "line": 506
+    },
+    {
+     "target": "llc_span",
+     "kind": "direct",
+     "line": 514
+    },
+    {
+     "target": "task_affinity_all",
+     "kind": "direct",
+     "line": 516
+    },
+    {
+     "target": "cpus_share_cache",
+     "kind": "direct",
+     "line": 533
+    },
+    {
+     "target": "scx_idle_test_and_clear_cpu",
+     "kind": "direct",
+     "line": 534
+    },
+    {
+     "target": "scx_cpu_node_if_enabled",
+     "kind": "direct",
+     "line": 552
+    },
+    {
+     "target": "idle_cpumask",
+     "kind": "direct",
+     "line": 556
+    },
+    {
+     "target": "idle_cpumask",
+     "kind": "direct",
+     "line": 571
+    },
+    {
+     "target": "scx_idle_test_and_clear_cpu",
+     "kind": "direct",
+     "line": 572
+    },
+    {
+     "target": "pick_idle_cpu_in_node",
+     "kind": "direct",
+     "line": 581
+    },
+    {
+     "target": "pick_idle_cpu_in_node",
+     "kind": "direct",
+     "line": 590
+    },
+    {
+     "target": "scx_pick_idle_cpu",
+     "kind": "direct",
+     "line": 603
+    },
+    {
+     "target": "scx_idle_test_and_clear_cpu",
+     "kind": "direct",
+     "line": 620
+    },
+    {
+     "target": "scx_idle_test_and_clear_cpu",
+     "kind": "direct",
+     "line": 633
+    },
+    {
+     "target": "pick_idle_cpu_in_node",
+     "kind": "direct",
+     "line": 643
+    },
+    {
+     "target": "pick_idle_cpu_in_node",
+     "kind": "direct",
+     "line": 652
+    },
+    {
+     "target": "scx_pick_idle_cpu",
+     "kind": "direct",
+     "line": 665
+    }
+   ]
+  },
+  "scx_task_on_sched": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_internal.h",
+   "line": 1419,
+   "end_line": 1423,
+   "depth": 1,
+   "reads": [
+    "task_struct.scx.sched"
+   ],
+   "events": [],
+   "callees": []
+  },
+  "scx_task_sched": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_internal.h",
+   "line": 1394,
+   "end_line": 1399,
+   "depth": 1,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled",
+    "task_struct.scx.sched",
+    "task_struct.thread_info.cpu"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "pi_lock",
+     "line": 1396
+    },
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "line": 1396
+    },
+    {
+     "kind": "assert_held",
+     "lock": "ptrace_entry",
+     "line": 1396
+    },
+    {
+     "kind": "assert_held",
+     "lock": "lockdep_map",
+     "line": 1396
+    }
+   ],
+   "callees": []
+  },
+  "scx_vet_enq_flags": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 8082,
+   "end_line": 8097,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "unlikely(!is_local)",
+     "action": "error",
+     "line": 8088
+    },
+    {
+     "kind": "error",
+     "msg": "SCX_ENQ_IMMED on a non-local DSQ 0x%llx",
+     "line": 8089
+    }
+   ],
+   "callees": []
+  },
+  "select_cpu_from_kfunc": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 912,
+   "end_line": 978,
+   "depth": 1,
+   "reads": [
+    "rq.scx.in_select_cpu",
+    "task_struct.cpus_ptr",
+    "task_struct.nr_cpus_allowed",
+    "task_struct.pid",
+    "task_struct.thread_info.cpu"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "ops_cpu_valid",
+     "line": 920
+    },
+    {
+     "kind": "guard",
+     "cond": "!ops_cpu_valid(sch, prev_cpu, NULL)",
+     "action": "return",
+     "line": 920
+    },
+    {
+     "kind": "call",
+     "target": "check_builtin_idle_enabled",
+     "line": 923
+    },
+    {
+     "kind": "call",
+     "target": "__this_rq",
+     "line": 940
+    },
+    {
+     "kind": "call",
+     "target": "scx_kf_arg_task_ok",
+     "line": 941
+    },
+    {
+     "kind": "guard",
+     "cond": "!scx_kf_arg_task_ok(sch, p)",
+     "action": "return",
+     "line": 941
+    },
+    {
+     "kind": "assert_held",
+     "lock": "pi_lock",
+     "expr": "&p->pi_lock",
+     "line": 943
+    },
+    {
+     "kind": "call",
+     "target": "scx_locked_rq",
+     "line": 944
+    },
+    {
+     "kind": "guard",
+     "cond": "task_rq(p) != scx_locked_rq()",
+     "action": "continue",
+     "line": 945
+    },
+    {
+     "kind": "call",
+     "target": "scx_locked_rq",
+     "line": 945
+    },
+    {
+     "kind": "lock",
+     "lock": "pi_lock",
+     "expr": "&p->pi_lock",
+     "line": 948
+    },
+    {
+     "kind": "call",
+     "target": "is_bpf_migration_disabled",
+     "line": 958
+    },
+    {
+     "kind": "call",
+     "target": "scx_idle_test_and_clear_cpu",
+     "line": 960
+    },
+    {
+     "kind": "call",
+     "target": "scx_select_cpu_dfl",
+     "line": 965
+    },
+    {
+     "kind": "unlock",
+     "lock": "pi_lock",
+     "expr": "&p->pi_lock",
+     "line": 970
+    },
+    {
+     "kind": "error",
+     "msg": "select_cpu kfunc called cross-task on %s[%d]",
+     "line": 975
+    }
+   ],
+   "callees": [
+    {
+     "target": "ops_cpu_valid",
+     "kind": "direct",
+     "line": 920
+    },
+    {
+     "target": "check_builtin_idle_enabled",
+     "kind": "direct",
+     "line": 923
+    },
+    {
+     "target": "__this_rq",
+     "kind": "direct",
+     "line": 940
+    },
+    {
+     "target": "scx_kf_arg_task_ok",
+     "kind": "direct",
+     "line": 941
+    },
+    {
+     "target": "scx_locked_rq",
+     "kind": "direct",
+     "line": 944
+    },
+    {
+     "target": "scx_locked_rq",
+     "kind": "direct",
+     "line": 945
+    },
+    {
+     "target": "is_bpf_migration_disabled",
+     "kind": "direct",
+     "line": 958
+    },
+    {
+     "target": "scx_idle_test_and_clear_cpu",
+     "kind": "direct",
+     "line": 960
+    },
+    {
+     "target": "scx_select_cpu_dfl",
+     "kind": "direct",
+     "line": 965
+    }
+   ]
+  },
+  "seq_buf_putc": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "seq_buf_vprintf": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "set_task_cpu": {
+   "kind": "boundary",
+   "file": "kernel/sched/core.c",
+   "line": 3301,
+   "end_line": 3351,
+   "depth": 4,
+   "callees": []
+  },
+  "task_affinity_all": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 411,
+   "end_line": 414,
+   "depth": 3,
+   "reads": [
+    "task_struct.nr_cpus_allowed"
+   ],
+   "events": [],
+   "callees": []
+  },
+  "task_allowed_on_cpu": {
+   "kind": "internal",
+   "file": "kernel/sched/sched.h",
+   "line": 2820,
+   "end_line": 2831,
+   "depth": 3,
+   "reads": [
+    "task_struct.cpus_ptr"
+   ],
+   "events": [],
+   "callees": []
+  },
+  "task_can_run_on_remote_rq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2328,
+   "end_line": 2375,
+   "depth": 2,
+   "reads": [
+    "task_struct.pid",
+    "task_struct.thread_info.cpu"
+   ],
+   "events": [
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 2332
+    },
+    {
+     "kind": "warn",
+     "msg": "task_cpu(p) == cpu",
+     "line": 2334
+    },
+    {
+     "kind": "call",
+     "target": "is_migration_disabled",
+     "line": 2348
+    },
+    {
+     "kind": "guard",
+     "cond": "unlikely(is_migration_disabled(p))",
+     "action": "return",
+     "line": 2348
+    },
+    {
+     "kind": "error",
+     "msg": "SCX_DSQ_LOCAL[_ON] cannot move migration disabled %s[%d] from CPU %d to %d",
+     "line": 2350
+    },
+    {
+     "kind": "guard",
+     "cond": "!task_allowed_on_cpu(p, cpu)",
+     "action": "return",
+     "line": 2361
+    },
+    {
+     "kind": "call",
+     "target": "task_allowed_on_cpu",
+     "line": 2361
+    },
+    {
+     "kind": "error",
+     "msg": "SCX_DSQ_LOCAL[_ON] target CPU %d not allowed for %s[%d]",
+     "line": 2363
+    },
+    {
+     "kind": "guard",
+     "cond": "!scx_rq_online(rq)",
+     "action": "return",
+     "line": 2368
+    },
+    {
+     "kind": "call",
+     "target": "scx_rq_online",
+     "line": 2368
+    }
+   ],
+   "callees": [
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 2332
+    },
+    {
+     "target": "is_migration_disabled",
+     "kind": "direct",
+     "line": 2348
+    },
+    {
+     "target": "task_allowed_on_cpu",
+     "kind": "direct",
+     "line": 2361
+    },
+    {
+     "target": "scx_rq_online",
+     "kind": "direct",
+     "line": 2368
+    }
+   ]
+  },
+  "task_scx_migrating": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1431,
+   "end_line": 1440,
+   "depth": 5,
+   "reads": [
+    "task_struct.scx.sticky_cpu"
+   ],
+   "events": [],
+   "callees": []
+  },
+  "task_unlink_from_dsq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1646,
+   "end_line": 1666,
+   "depth": 2,
+   "reads": [
+    "scx_dispatch_q.first_task",
+    "scx_dispatch_q.id",
+    "task_struct.scx.dsq_flags",
+    "task_struct.scx.dsq_list.node"
+   ],
+   "writes": [
+    "scx_dispatch_q.first_task",
+    "task_struct.scx.dsq_flags",
+    "task_struct.scx.dsq_list.node",
+    "task_struct.scx.dsq_priq"
+   ],
+   "events": [
+    {
+     "kind": "warn",
+     "msg": "list_empty(&p->scx.dsq_list.node)",
+     "line": 1649
+    },
+    {
+     "kind": "call",
+     "target": "rb_erase",
+     "line": 1652
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_priq",
+     "op": "set",
+     "line": 1653
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_flags",
+     "op": "set",
+     "line": 1654
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.dsq_list.node",
+     "op": "list_del",
+     "line": 1657
+    },
+    {
+     "kind": "call",
+     "target": "dsq_dec_nr",
+     "line": 1658
+    },
+    {
+     "kind": "call",
+     "target": "nldsq_next_task",
+     "line": 1663
+    },
+    {
+     "kind": "write",
+     "field": "scx_dispatch_q.first_task",
+     "op": "write_once",
+     "line": 1664
+    }
+   ],
+   "callees": [
+    {
+     "target": "rb_erase",
+     "kind": "direct",
+     "line": 1652
+    },
+    {
+     "target": "dsq_dec_nr",
+     "kind": "direct",
+     "line": 1658
+    },
+    {
+     "target": "nldsq_next_task",
+     "kind": "direct",
+     "line": 1663
+    }
+   ]
+  },
+  "tg_cgrp": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 3539,
+   "end_line": 3550,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "guard",
+     "cond": "tg && tg->css.cgroup",
+     "action": "return",
+     "line": 3546
+    }
+   ],
+   "callees": []
+  },
+  "touch_core_sched": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1301,
+   "end_line": 1316,
+   "depth": 3,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "writes": [
+    "task_struct.scx.core_sched_at"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 1303
+    },
+    {
+     "kind": "call",
+     "target": "sched_core_disabled",
+     "line": 1313
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.core_sched_at",
+     "op": "set",
+     "line": 1314
+    },
+    {
+     "kind": "call",
+     "target": "sched_clock_cpu",
+     "line": 1314
+    },
+    {
+     "kind": "call",
+     "target": "cpu_of",
+     "line": 1314
+    }
+   ],
+   "callees": [
+    {
+     "target": "sched_core_disabled",
+     "kind": "direct",
+     "line": 1313
+    },
+    {
+     "target": "cpu_of",
+     "kind": "direct",
+     "line": 1314
+    },
+    {
+     "target": "sched_clock_cpu",
+     "kind": "direct",
+     "line": 1314
+    }
+   ]
+  },
+  "touch_core_sched_dispatch": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1328,
+   "end_line": 1336,
+   "depth": 3,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 1330
+    },
+    {
+     "kind": "call",
+     "target": "touch_core_sched",
+     "line": 1334
+    }
+   ],
+   "callees": [
+    {
+     "target": "touch_core_sched",
+     "kind": "direct",
+     "line": 1334
+    }
+   ]
+  },
+  "u32_before": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 231,
+   "end_line": 234,
+   "depth": 2,
+   "events": [],
+   "callees": []
+  },
+  "unlink_dsq_and_lock_src_rq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 2406,
+   "end_line": 2424,
+   "depth": 3,
+   "reads": [
+    "task_struct.scx.holding_cpu",
+    "task_struct.thread_info.cpu"
+   ],
+   "writes": [
+    "task_struct.scx.holding_cpu"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 2412
+    },
+    {
+     "kind": "warn",
+     "msg": "p->scx.holding_cpu >= 0",
+     "line": 2414
+    },
+    {
+     "kind": "call",
+     "target": "task_unlink_from_dsq",
+     "line": 2415
+    },
+    {
+     "kind": "write",
+     "field": "task_struct.scx.holding_cpu",
+     "op": "set",
+     "line": 2416
+    },
+    {
+     "kind": "unlock",
+     "lock": "dsq",
+     "expr": "&dsq->lock",
+     "line": 2418
+    },
+    {
+     "kind": "lock",
+     "lock": "rq",
+     "expr": "src_rq",
+     "line": 2419
+    },
+    {
+     "kind": "warn",
+     "msg": "src_rq != task_rq(p)",
+     "line": 2423
+    }
+   ],
+   "callees": [
+    {
+     "target": "task_unlink_from_dsq",
+     "kind": "direct",
+     "line": 2415
+    }
+   ]
+  },
+  "update_locked_rq": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 458,
+   "end_line": 468,
+   "depth": 2,
+   "reads": [
+    "rq.core",
+    "rq.core_enabled"
+   ],
+   "events": [
+    {
+     "kind": "assert_held",
+     "lock": "rq",
+     "expr": "rq",
+     "line": 466
+    }
+   ],
+   "callees": []
+  },
+  "update_rq_clock": {
+   "kind": "boundary",
+   "file": "kernel/sched/core.c",
+   "line": 845,
+   "end_line": 868,
+   "depth": 1,
+   "callees": []
+  },
+  "validate_node": {
+   "kind": "internal",
+   "file": "kernel/sched/ext_idle.c",
+   "line": 842,
+   "end_line": 866,
+   "depth": 1,
+   "events": [
+    {
+     "kind": "error",
+     "msg": "per-node idle tracking is disabled",
+     "line": 845
+    },
+    {
+     "kind": "guard",
+     "cond": "node == NUMA_NO_NODE",
+     "action": "return",
+     "line": 850
+    },
+    {
+     "kind": "guard",
+     "cond": "node < 0 || node >= nr_node_ids",
+     "action": "error",
+     "line": 854
+    },
+    {
+     "kind": "error",
+     "msg": "invalid node %d",
+     "line": 855
+    },
+    {
+     "kind": "guard",
+     "cond": "!node_possible(node)",
+     "action": "error",
+     "line": 860
+    },
+    {
+     "kind": "error",
+     "msg": "unavailable node %d",
+     "line": 861
+    }
+   ],
+   "callees": []
+  },
+  "vscnprintf": {
+   "kind": "external",
+   "depth": 2,
+   "callees": []
+  },
+  "wait_ops_state": {
+   "kind": "internal",
+   "file": "kernel/sched/ext.c",
+   "line": 1076,
+   "end_line": 1081,
+   "depth": 3,
+   "reads": [
+    "task_struct.scx.ops_state"
+   ],
+   "events": [
+    {
+     "kind": "atomic",
+     "field": "task_struct.scx.ops_state",
+     "op": "read_acquire",
+     "line": 1080
+    }
+   ],
+   "callees": []
+  },
+  "wakeup_preempt": {
+   "kind": "boundary",
+   "file": "kernel/sched/core.c",
+   "line": 2243,
+   "end_line": 2262,
+   "depth": 4,
+   "callees": []
+  }
+ }
+}
