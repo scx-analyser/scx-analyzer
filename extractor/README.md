@@ -79,6 +79,26 @@ Roots are always expanded. With the defaults, v7.1 gives 267 nodes (59 kfuncs, 9
 
 The kernel tree is inferred from the IR's debug info (pass `--kernel` if it moved); it is needed for `end_line`.
 
+### Field reads and writes (B5)
+
+`reads`/`writes` list the fields of the tracked structs (`task_struct`, `sched_ext_entity` as `task_struct.scx`,
+`rq`, `scx_rq` as `rq.scx`, `scx_dispatch_q`) that a function loads or stores:
+
+- A pointer is resolved to *(root struct, byte offset)* from struct GEPs (offsets from the IR type layout), byte
+  GEPs on a known base, pointer-typed debug values (arguments, locals) and loads of pointer fields
+  (`p->scx.dsq`). `container_of()` is followed both as a negative byte offset and as clang's folded form (a GEP of
+  `struct scx_rq` on a DSQ pointer).
+- The field is read from DWARF: the members that contain the accessed bytes, down to generic containers
+  (`list_head`, `rb_node`, `atomic*_t`, `raw_spinlock_t`, `cpumask`, ...). Bitfield storage is not attributed.
+- Loads are reads, stores (incl. `WRITE_ONCE`) are writes, and x86 memory-operand inline asm (`set_bit`,
+  lock-prefixed RMW) is both.
+- Inlined generic library code (`include/`, `arch/`: `list_add`, `atomic_long_set`, `cpumask_set_cpu`, ...) is
+  attributed to the calling function at the call-site line, so its stores are the caller's writes. This also
+  removes those helpers as separate nodes (228 nodes on v7.1, 40 distinct written fields).
+
+Limits: accesses through pointers whose type cannot be recovered (e.g. a list neighbour loaded from `node.next`,
+or a pointer chosen by a `phi`) are not attributed, and functions that are only `external` have no sets.
+
 Notes:
 - Inlined helpers: use debug-info `inlinedAt` or build analysis IR with `-fno-inline`.
 - Indirect calls (`SCX_CALL_OP*`, `sched_class` methods) must appear as `kind: indirect`, never dropped.
